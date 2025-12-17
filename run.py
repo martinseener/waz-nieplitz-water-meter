@@ -1,0 +1,630 @@
+#!/usr/bin/env python3
+"""
+WAZ Nieplitz Water Meter Add-on
+Fetches water meter readings from kundenportal.waz-nieplitz.de
+"""
+
+import json
+import logging
+import os
+import sys
+import time
+from datetime import datetime
+from typing import Dict, List, Optional
+
+import requests
+from bs4 import BeautifulSoup
+from dateutil import parser as date_parser
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+# Constants
+BASE_URL = "https://kundenportal.waz-nieplitz.de"
+LOGIN_URL = f"{BASE_URL}/login"
+READINGS_URL = f"{BASE_URL}/ablesungen"
+SUPERVISOR_TOKEN = os.environ.get("SUPERVISOR_TOKEN")
+HA_URL = "http://supervisor/core/api"
+MANUAL_FETCH_TRIGGER = "/data/manual_fetch"
+CHECK_INTERVAL = 60  # Check for manual trigger every 60 seconds
+HISTORICAL_READINGS_FILE = "/data/historical_readings.json"
+
+
+class HistoricalReadingsManager:
+    """Manager for manual historical water meter readings."""
+
+    def __init__(self, filepath: str = HISTORICAL_READINGS_FILE):
+        """Initialize the manager."""
+        self.filepath = filepath
+        self.readings = self._load_readings()
+
+    def _load_readings(self) -> Dict[str, List[Dict]]:
+        """Load historical readings from file."""
+        try:
+            if os.path.exists(self.filepath):
+                with open(self.filepath, 'r') as f:
+                    data = json.load(f)
+                    logger.info(f"Loaded {sum(len(r) for r in data.values())} historical reading(s)")
+                    return data
+            else:
+                logger.info("No historical readings file found, starting fresh")
+                return {}
+        except Exception as e:
+            logger.error(f"Error loading historical readings: {e}")
+            return {}
+
+    def _save_readings(self):
+        """Save historical readings to file."""
+        try:
+            # Ensure /data directory exists
+            os.makedirs(os.path.dirname(self.filepath), exist_ok=True)
+
+            with open(self.filepath, 'w') as f:
+                json.dump(self.readings, f, indent=2)
+            logger.info("Historical readings saved successfully")
+        except Exception as e:
+            logger.error(f"Error saving historical readings: {e}")
+
+    def add_reading(self, meter_number: str, date: str, reading: float,
+                   consumption: Optional[float] = None, reading_type: str = "Manual Entry") -> bool:
+        """
+        Add a manual historical reading.
+
+        Args:
+            meter_number: The meter number (e.g., "15093668")
+            date: Date string in format "YYYY-MM-DD" or "DD.MM.YYYY"
+            reading: The meter reading in m³
+            consumption: Optional consumption for this period in m³
+            reading_type: Description of the reading type
+
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            # Parse date
+            try:
+                # Try ISO format first
+                parsed_date = datetime.strptime(date, "%Y-%m-%d")
+            except ValueError:
+                # Try German format
+                parsed_date = datetime.strptime(date, "%d.%m.%Y")
+
+            # Initialize meter if not exists
+            if meter_number not in self.readings:
+                self.readings[meter_number] = []
+
+            # Create reading entry
+            entry = {
+                "date": parsed_date.isoformat(),
+                "reading": float(reading),
+                "consumption": float(consumption) if consumption is not None else None,
+                "reading_type": reading_type,
+                "manual": True
+            }
+
+            # Check if reading already exists for this date
+            existing_idx = None
+            for idx, r in enumerate(self.readings[meter_number]):
+                if r["date"] == entry["date"]:
+                    existing_idx = idx
+                    break
+
+            if existing_idx is not None:
+                # Update existing entry
+                self.readings[meter_number][existing_idx] = entry
+                logger.info(f"Updated historical reading for meter {meter_number} on {date}")
+            else:
+                # Add new entry
+                self.readings[meter_number].append(entry)
+                logger.info(f"Added historical reading for meter {meter_number} on {date}: {reading} m³")
+
+            # Sort readings by date
+            self.readings[meter_number].sort(key=lambda x: x["date"])
+
+            # Save to file
+            self._save_readings()
+            return True
+
+        except Exception as e:
+            logger.error(f"Error adding historical reading: {e}")
+            return False
+
+    def get_readings(self, meter_number: str) -> List[Dict]:
+        """Get all historical readings for a meter."""
+        return self.readings.get(meter_number, [])
+
+    def get_all_readings(self) -> Dict[str, List[Dict]]:
+        """Get all historical readings for all meters."""
+        return self.readings
+
+    def delete_reading(self, meter_number: str, date: str) -> bool:
+        """Delete a specific historical reading."""
+        try:
+            if meter_number not in self.readings:
+                return False
+
+            # Parse date
+            try:
+                parsed_date = datetime.strptime(date, "%Y-%m-%d")
+            except ValueError:
+                parsed_date = datetime.strptime(date, "%d.%m.%Y")
+
+            iso_date = parsed_date.isoformat()
+
+            # Find and remove reading
+            self.readings[meter_number] = [
+                r for r in self.readings[meter_number]
+                if r["date"] != iso_date
+            ]
+
+            # Remove meter entry if no readings left
+            if not self.readings[meter_number]:
+                del self.readings[meter_number]
+
+            self._save_readings()
+            logger.info(f"Deleted historical reading for meter {meter_number} on {date}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Error deleting historical reading: {e}")
+            return False
+
+
+class WAZNieplitzClient:
+    """Client for WAZ Nieplitz customer portal."""
+
+    def __init__(self, username: str, password: str):
+        """Initialize the client."""
+        self.username = username
+        self.password = password
+        self.session = requests.Session()
+        self.session.headers.update({
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        })
+
+    def login(self) -> bool:
+        """Login to the portal."""
+        try:
+            logger.info("Attempting to login to WAZ Nieplitz portal...")
+
+            # First, get the login page to retrieve any CSRF tokens or form data
+            response = self.session.get(LOGIN_URL, timeout=30)
+            response.raise_for_status()
+
+            soup = BeautifulSoup(response.content, 'html.parser')
+
+            # Find the login form
+            form = soup.find('form')
+            if not form:
+                logger.error("Could not find login form")
+                return False
+
+            # Prepare login data
+            login_data = {
+                'username': self.username,
+                'password': self.password
+            }
+
+            # Add any hidden fields from the form
+            for hidden_input in soup.find_all('input', type='hidden'):
+                name = hidden_input.get('name')
+                value = hidden_input.get('value', '')
+                if name:
+                    login_data[name] = value
+
+            # Submit login form
+            action = form.get('action', LOGIN_URL)
+            if not action.startswith('http'):
+                action = BASE_URL + action
+
+            response = self.session.post(action, data=login_data, timeout=30)
+            response.raise_for_status()
+
+            # Check if login was successful by trying to access the readings page
+            test_response = self.session.get(READINGS_URL, timeout=30)
+            if test_response.status_code == 200 and 'Ablesungen' in test_response.text:
+                logger.info("Login successful")
+                return True
+            else:
+                logger.error("Login failed - could not access readings page")
+                return False
+
+        except Exception as e:
+            logger.error(f"Login error: {e}")
+            return False
+
+    def get_meter_readings(self) -> List[Dict]:
+        """Fetch meter readings from the portal."""
+        try:
+            logger.info("Fetching meter readings...")
+
+            response = self.session.get(READINGS_URL, timeout=30)
+            response.raise_for_status()
+
+            soup = BeautifulSoup(response.content, 'html.parser')
+
+            # Find the table with readings
+            table = soup.find('table', class_='listview ablesungen')
+            if not table:
+                logger.error("Could not find readings table")
+                return []
+
+            meters = {}
+            current_meter = None
+
+            # Parse table rows
+            rows = table.find_all('tr', class_='item')
+            for row in rows:
+                # Extract meter number
+                meter_cell = row.find('td', class_='zaehler')
+                if meter_cell:
+                    meter_number = meter_cell.get_text(strip=True).replace('Zähler', '')
+
+                    # Extract reading date
+                    ablesetag_cell = row.find('td', class_='ablesetag')
+                    ablesetag = ablesetag_cell.get_text(strip=True).replace('Ablesetag', '') if ablesetag_cell else ''
+
+                    # Extract reference date (Stichtag)
+                    stichtag_cell = row.find('td', class_='stichtag')
+                    stichtag = stichtag_cell.get_text(strip=True).replace('Stichtag', '') if stichtag_cell else ''
+
+                    # Extract meter reading (Stand)
+                    stand_cell = row.find('td', class_='stand')
+                    stand = stand_cell.get_text(strip=True).replace('Stand', '') if stand_cell else '0'
+
+                    # Extract consumption (Verbrauch)
+                    verbrauch_cell = row.find('td', class_='verbrauch')
+                    verbrauch = verbrauch_cell.get_text(strip=True).replace('Verbrauch (m³)', '') if verbrauch_cell else '0'
+
+                    # Extract reading type
+                    ablesart_cell = row.find('td', class_='ablesart')
+                    ablesart = ablesart_cell.get_text(strip=True).replace('Ableseart', '') if ablesart_cell else ''
+
+                    # Parse reading date
+                    reading_date = None
+                    if ablesetag:
+                        try:
+                            reading_date = date_parser.parse(ablesetag, dayfirst=True)
+                        except:
+                            pass
+
+                    # Parse reference date
+                    reference_date = None
+                    if stichtag:
+                        try:
+                            reference_date = date_parser.parse(stichtag, dayfirst=True)
+                        except:
+                            pass
+
+                    # Store or update meter data (keep only the most recent reading per meter)
+                    if meter_number not in meters:
+                        meters[meter_number] = {
+                            'meter_number': meter_number,
+                            'reading_date': reading_date,
+                            'reference_date': reference_date,
+                            'reading': int(stand) if stand.isdigit() else 0,
+                            'consumption': int(verbrauch) if verbrauch.isdigit() else 0,
+                            'reading_type': ablesart
+                        }
+                    else:
+                        # Update if this reading is more recent
+                        existing = meters[meter_number]
+                        if reference_date and existing.get('reference_date'):
+                            if reference_date > existing['reference_date']:
+                                meters[meter_number] = {
+                                    'meter_number': meter_number,
+                                    'reading_date': reading_date,
+                                    'reference_date': reference_date,
+                                    'reading': int(stand) if stand.isdigit() else 0,
+                                    'consumption': int(verbrauch) if verbrauch.isdigit() else 0,
+                                    'reading_type': ablesart
+                                }
+
+            result = list(meters.values())
+            logger.info(f"Found {len(result)} meter(s)")
+            for meter in result:
+                logger.info(f"Meter {meter['meter_number']}: {meter['reading']} m³ "
+                          f"(Reference date: {meter['reference_date']})")
+
+            return result
+
+        except Exception as e:
+            logger.error(f"Error fetching readings: {e}")
+            return []
+
+
+class HomeAssistantAPI:
+    """Interface to Home Assistant API."""
+
+    def __init__(self):
+        """Initialize the API client."""
+        self.token = SUPERVISOR_TOKEN
+        self.headers = {
+            'Authorization': f'Bearer {self.token}',
+            'Content-Type': 'application/json'
+        }
+
+    def update_sensor(self, entity_id: str, state: float, attributes: Dict) -> bool:
+        """Update or create a sensor in Home Assistant."""
+        try:
+            url = f"{HA_URL}/states/{entity_id}"
+            data = {
+                'state': state,
+                'attributes': attributes
+            }
+
+            response = requests.post(url, headers=self.headers, json=data, timeout=10)
+            response.raise_for_status()
+
+            logger.info(f"Updated sensor {entity_id}: {state}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Error updating sensor {entity_id}: {e}")
+            return False
+
+    def register_service(self, domain: str, service: str, service_data: Dict) -> bool:
+        """Register a service with Home Assistant."""
+        try:
+            url = f"{HA_URL}/services/{domain}/{service}"
+            response = requests.post(url, headers=self.headers, json=service_data, timeout=10)
+            response.raise_for_status()
+            logger.info(f"Registered service {domain}.{service}")
+            return True
+        except Exception as e:
+            logger.error(f"Error registering service {domain}.{service}: {e}")
+            return False
+
+
+def load_config() -> Dict:
+    """Load add-on configuration."""
+    try:
+        with open('/data/options.json', 'r') as f:
+            return json.load(f)
+    except FileNotFoundError:
+        logger.warning("Configuration file not found, using environment variables")
+        return {
+            'username': os.environ.get('USERNAME', ''),
+            'password': os.environ.get('PASSWORD', ''),
+            'update_interval': int(os.environ.get('UPDATE_INTERVAL', '2592000')),  # 30 days
+            'main_meter_name': os.environ.get('MAIN_METER_NAME', 'Water Meter Main'),
+            'garden_meter_name': os.environ.get('GARDEN_METER_NAME', 'Water Meter Garden')
+        }
+
+
+def identify_meter_type(meter_number: str, all_meters: List[Dict]) -> str:
+    """
+    Identify if a meter is the main or garden meter.
+    Uses simple logic: first meter alphabetically is main, second is garden.
+    This can be improved with configuration or naming patterns.
+    """
+    sorted_meters = sorted(all_meters, key=lambda m: m['meter_number'])
+    meter_numbers = [m['meter_number'] for m in sorted_meters]
+
+    if meter_number == meter_numbers[0]:
+        return 'main'
+    elif len(meter_numbers) > 1 and meter_number == meter_numbers[1]:
+        return 'garden'
+    else:
+        return 'unknown'
+
+
+def check_manual_trigger() -> bool:
+    """Check if manual fetch trigger file exists."""
+    return os.path.exists(MANUAL_FETCH_TRIGGER)
+
+
+def clear_manual_trigger():
+    """Remove the manual fetch trigger file."""
+    try:
+        if os.path.exists(MANUAL_FETCH_TRIGGER):
+            os.remove(MANUAL_FETCH_TRIGGER)
+            logger.info("Manual fetch trigger cleared")
+    except Exception as e:
+        logger.error(f"Error clearing manual trigger: {e}")
+
+
+def fetch_and_update_meters(client: WAZNieplitzClient, ha_api: HomeAssistantAPI,
+                            main_meter_name: str, garden_meter_name: str,
+                            historical_manager: Optional[HistoricalReadingsManager] = None) -> bool:
+    """
+    Fetch meter readings and update Home Assistant sensors.
+    Returns True if successful, False otherwise.
+    """
+    try:
+        # Login to portal
+        if not client.login():
+            logger.error("Failed to login to portal")
+            return False
+
+        # Fetch meter readings
+        meters = client.get_meter_readings()
+
+        if not meters:
+            logger.warning("No meter readings found")
+            return False
+
+        # Update Home Assistant sensors
+        for meter in meters:
+            meter_type = identify_meter_type(meter['meter_number'], meters)
+
+            if meter_type == 'main':
+                entity_id = 'sensor.waz_nieplitz_water_main'
+                friendly_name = main_meter_name
+            elif meter_type == 'garden':
+                entity_id = 'sensor.waz_nieplitz_water_garden'
+                friendly_name = garden_meter_name
+            else:
+                entity_id = f"sensor.waz_nieplitz_water_{meter['meter_number']}"
+                friendly_name = f"Water Meter {meter['meter_number']}"
+
+            # Prepare attributes
+            attributes = {
+                'unit_of_measurement': 'm³',
+                'friendly_name': friendly_name,
+                'device_class': 'water',
+                'state_class': 'total_increasing',
+                'meter_number': meter['meter_number'],
+                'reading_type': meter['reading_type'],
+                'consumption': meter['consumption'],
+                'icon': 'mdi:water'
+            }
+
+            if meter['reading_date']:
+                attributes['reading_date'] = meter['reading_date'].isoformat()
+            if meter['reference_date']:
+                attributes['reference_date'] = meter['reference_date'].isoformat()
+
+            # Add historical readings to attributes
+            if historical_manager:
+                historical_readings = historical_manager.get_readings(meter['meter_number'])
+                if historical_readings:
+                    attributes['historical_readings'] = historical_readings
+                    attributes['historical_count'] = len(historical_readings)
+                    logger.info(f"Meter {meter['meter_number']}: {len(historical_readings)} historical reading(s)")
+
+            # Update sensor
+            ha_api.update_sensor(entity_id, meter['reading'], attributes)
+
+        return True
+
+    except Exception as e:
+        logger.error(f"Error during fetch and update: {e}")
+        return False
+
+
+def process_historical_command(historical_manager: HistoricalReadingsManager):
+    """Process historical reading commands from file."""
+    command_file = "/data/historical_command.json"
+
+    try:
+        if not os.path.exists(command_file):
+            return
+
+        with open(command_file, 'r') as f:
+            command = json.load(f)
+
+        action = command.get('action')
+
+        if action == 'add':
+            meter_number = command.get('meter_number')
+            date = command.get('date')
+            reading = command.get('reading')
+            consumption = command.get('consumption')
+            reading_type = command.get('reading_type', 'Manual Entry')
+
+            if meter_number and date and reading is not None:
+                success = historical_manager.add_reading(
+                    meter_number, date, reading, consumption, reading_type
+                )
+                logger.info(f"Historical reading add {'succeeded' if success else 'failed'}")
+            else:
+                logger.error("Missing required fields for add command")
+
+        elif action == 'delete':
+            meter_number = command.get('meter_number')
+            date = command.get('date')
+
+            if meter_number and date:
+                success = historical_manager.delete_reading(meter_number, date)
+                logger.info(f"Historical reading delete {'succeeded' if success else 'failed'}")
+            else:
+                logger.error("Missing required fields for delete command")
+
+        # Remove command file after processing
+        os.remove(command_file)
+        logger.info("Historical command processed and file removed")
+
+    except Exception as e:
+        logger.error(f"Error processing historical command: {e}")
+        # Try to remove file even on error
+        try:
+            if os.path.exists(command_file):
+                os.remove(command_file)
+        except:
+            pass
+
+
+def main():
+    """Main loop."""
+    logger.info("Starting WAZ Nieplitz Water Meter Add-on")
+
+    # Load configuration
+    config = load_config()
+
+    username = config.get('username', '')
+    password = config.get('password', '')
+    update_interval = config.get('update_interval', 2592000)  # Default: 30 days
+    main_meter_name = config.get('main_meter_name', 'Water Meter Main')
+    garden_meter_name = config.get('garden_meter_name', 'Water Meter Garden')
+
+    if not username or not password:
+        logger.error("Username and password must be configured")
+        sys.exit(1)
+
+    logger.info(f"Update interval: {update_interval} seconds ({update_interval / 86400:.1f} days)")
+    logger.info(f"Manual fetch trigger: Create file '{MANUAL_FETCH_TRIGGER}' to trigger immediate update")
+    logger.info(f"Historical readings file: {HISTORICAL_READINGS_FILE}")
+
+    # Initialize clients
+    client = WAZNieplitzClient(username, password)
+    ha_api = HomeAssistantAPI()
+    historical_manager = HistoricalReadingsManager()
+
+    # Perform initial fetch
+    logger.info("Performing initial meter reading fetch...")
+    fetch_and_update_meters(client, ha_api, main_meter_name, garden_meter_name, historical_manager)
+
+    # Calculate how many check intervals equal one update interval
+    checks_per_update = update_interval // CHECK_INTERVAL
+    check_counter = 0
+
+    last_update_time = time.time()
+
+    while True:
+        try:
+            # Check for historical reading commands
+            process_historical_command(historical_manager)
+
+            # Check for manual trigger
+            if check_manual_trigger():
+                logger.info("Manual fetch triggered! Fetching readings immediately...")
+                clear_manual_trigger()
+                if fetch_and_update_meters(client, ha_api, main_meter_name, garden_meter_name, historical_manager):
+                    logger.info("Manual fetch completed successfully")
+                    last_update_time = time.time()
+                    check_counter = 0  # Reset counter after manual fetch
+                else:
+                    logger.error("Manual fetch failed")
+
+            # Check if it's time for scheduled update
+            elif check_counter >= checks_per_update:
+                logger.info("Scheduled update triggered")
+                if fetch_and_update_meters(client, ha_api, main_meter_name, garden_meter_name, historical_manager):
+                    logger.info("Scheduled update completed successfully")
+                    last_update_time = time.time()
+                    check_counter = 0
+                else:
+                    logger.error("Scheduled update failed, will retry in 5 minutes")
+                    time.sleep(300)
+                    continue
+
+            # Sleep and increment counter
+            check_counter += 1
+            time.sleep(CHECK_INTERVAL)
+
+        except KeyboardInterrupt:
+            logger.info("Shutting down...")
+            break
+        except Exception as e:
+            logger.error(f"Unexpected error: {e}")
+            logger.info("Retrying in 5 minutes...")
+            time.sleep(300)
+
+
+if __name__ == '__main__':
+    main()

@@ -1,0 +1,7 @@
+{
+  "username": "your_test_username",
+  "password": "your_test_password",
+  "update_interval": 86400,
+  "main_meter_name": "Test Water Meter Main",
+  "garden_meter_name": "Test Water Meter Garden"
+}

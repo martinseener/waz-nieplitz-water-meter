@@ -1,0 +1,29 @@
+{
+  "name": "WAZ Nieplitz Water Meter",
+  "version": "1.2.0",
+  "slug": "waz-nieplitz-water-meter",
+  "description": "Fetch water meter readings from WAZ Nieplitz customer portal. Default: monthly updates (readings are typically annual). Supports manual fetch and historical readings beyond the 2-year portal window.",
+  "arch": ["armhf", "armv7", "aarch64", "amd64", "i386"],
+  "startup": "application",
+  "boot": "auto",
+  "options": {
+    "username": "",
+    "password": "",
+    "update_interval": 2592000,
+    "main_meter_name": "Water Meter Main",
+    "garden_meter_name": "Water Meter Garden"
+  },
+  "schema": {
+    "username": "str",
+    "password": "password",
+    "update_interval": "int(86400,)?",
+    "main_meter_name": "str?",
+    "garden_meter_name": "str?"
+  },
+  "homeassistant_api": true,
+  "hassio_api": true,
+  "hassio_role": "default",
+  "auth_api": false,
+  "ingress": false,
+  "panel_icon": "mdi:water-pump"
+}
