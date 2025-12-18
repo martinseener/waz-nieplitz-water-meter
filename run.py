@@ -531,6 +531,8 @@ class HomeAssistantAPI:
                     raise Exception(f"Authentication failed: {result}")
 
                 # Send import_statistics command
+                # Note: source must be a custom integration name, not 'recorder'
+                # For external statistics, use the add-on slug
                 command = {
                     'id': 1,
                     'type': 'recorder/import_statistics',
@@ -538,7 +540,7 @@ class HomeAssistantAPI:
                         'has_mean': False,
                         'has_sum': True,
                         'name': friendly_name,
-                        'source': 'recorder',
+                        'source': 'waz_nieplitz',
                         'statistic_id': statistic_id,
                         'unit_of_measurement': 'm³'
                     },

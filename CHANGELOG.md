@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.5.1] - 2025-12-18
+
+### Fixed
+- **Statistics import "Invalid source" error**
+  - Changed source from 'recorder' to 'waz_nieplitz' (custom integration name)
+  - External statistics require a custom source identifier, not 'recorder'
+
+- **Web interface routes returning 404 through ingress**
+  - Changed all fetch() calls from absolute paths (`/config`) to relative paths (`config`)
+  - Fixes meter dropdown not loading when accessed through HA ingress proxy
+  - Fixes status and historical readings not loading
+
+### Technical
+- For external statistics, source must be a custom integration/add-on name
+- Ingress proxy requires relative URLs for proper routing
+- All JavaScript fetch calls now use relative paths
+
 ## [1.5.0] - 2025-12-18
 
 ### Changed

@@ -302,7 +302,7 @@
             status.textContent = '';
 
             try {
-                const response = await fetch('/fetch', {
+                const response = await fetch('fetch', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
@@ -344,7 +344,7 @@
             message.style.display = 'none';
 
             try {
-                const response = await fetch('/historical/add', {
+                const response = await fetch('historical/add', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
@@ -384,7 +384,7 @@
             message.style.display = 'none';
 
             try {
-                const response = await fetch('/historical/delete', {
+                const response = await fetch('historical/delete', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
@@ -414,8 +414,8 @@
         // Load configuration and historical readings
         async function loadConfig() {
             try {
-                console.log('Loading config from /config endpoint...');
-                const response = await fetch('/config');
+                console.log('Loading config from config endpoint...');
+                const response = await fetch('config');
 
                 if (!response.ok) {
                     console.error('Config fetch failed:', response.status, response.statusText);
@@ -469,7 +469,7 @@
             const container = document.getElementById('historicalReadings');
 
             try {
-                const response = await fetch('/historical/list');
+                const response = await fetch('historical/list');
                 const data = await response.json();
 
                 if (!data.readings || Object.keys(data.readings).length === 0) {
@@ -548,7 +548,7 @@
             await loadConfig();
 
             // Load status
-            fetch('/status')
+            fetch('status')
                 .then(response => response.json())
                 .then(data => {
                     if (data.last_fetch) {
