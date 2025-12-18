@@ -2,6 +2,51 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.3.0] - 2025-12-18
+
+### Added
+- **Web Interface with Manual Reload Button**
+  - Enabled ingress support for web-based control panel
+  - Added Flask web server with clean, modern UI
+  - Manual fetch button accessible from Home Assistant sidebar
+  - Real-time status display showing last fetch time
+  - Panel accessible at "WAZ Nieplitz Water" in sidebar
+
+- **Meter Number Configuration**
+  - New config options: `main_meter_number` and `garden_meter_number`
+  - Users can now specify exact meter numbers to track
+  - Only configured meters will create sensors
+  - Prevents unwanted sensors from being created
+
+### Changed
+- **BREAKING: Meter Identification Logic**
+  - Changed from alphabetical sorting to explicit configuration
+  - Meters must now be configured with their meter numbers
+  - Unknown/unconfigured meters are skipped
+  - More predictable and user-controlled behavior
+
+- **Sensor Creation**
+  - Only creates sensors for explicitly configured meters
+  - If main_meter_number is not set, no main sensor is created
+  - If garden_meter_number is not set, no garden sensor is created
+  - Users can choose to track one or both meters
+
+### Improved
+- Web interface provides easy manual fetch without file manipulation
+- Better logging when meters are skipped or not found
+- Warnings when configured meters aren't found in portal
+- Cleaner configuration with explicit meter selection
+
+### Migration Notes
+**Important:** After upgrading to v1.3.0, you must configure meter numbers:
+1. Go to Settings → Add-ons → WAZ Nieplitz Water Meter → Configuration
+2. Find your meter numbers in the add-on logs (they're displayed during fetch)
+3. Set `main_meter_number` to your main water meter number (e.g., "15093668")
+4. Set `garden_meter_number` to your garden meter number (e.g., "2181453194")
+5. Restart the add-on
+
+Without configuration, no sensors will be created!
+
 ## [1.2.7] - 2025-12-18
 
 ### Fixed

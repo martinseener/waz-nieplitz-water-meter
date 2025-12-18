@@ -10,6 +10,7 @@ RUN \
 # Copy data for add-on
 COPY run.py /
 COPY run.sh /
+COPY index.html /
 COPY requirements.txt /tmp/
 
 # Install Python packages

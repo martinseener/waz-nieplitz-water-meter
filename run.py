@@ -8,6 +8,7 @@ import json
 import logging
 import os
 import sys
+import threading
 import time
 from datetime import datetime
 from typing import Dict, List, Optional
@@ -15,6 +16,7 @@ from typing import Dict, List, Optional
 import requests
 from bs4 import BeautifulSoup
 from dateutil import parser as date_parser
+from flask import Flask, jsonify, send_file
 
 # Configure logging
 logging.basicConfig(
@@ -32,6 +34,17 @@ HA_URL = "http://supervisor/core/api"
 MANUAL_FETCH_TRIGGER = "/data/manual_fetch"
 CHECK_INTERVAL = 60  # Check for manual trigger every 60 seconds
 HISTORICAL_READINGS_FILE = "/data/historical_readings.json"
+INGRESS_PORT = int(os.environ.get('INGRESS_PORT', '8099'))
+
+# Flask app
+app = Flask(__name__)
+app.logger.setLevel(logging.ERROR)  # Suppress Flask logging
+
+# Global state for web interface
+app_state = {
+    'last_fetch': None,
+    'fetch_callback': None  # Will be set to trigger manual fetch
+}
 
 
 class HistoricalReadingsManager:
@@ -438,23 +451,30 @@ def load_config() -> Dict:
             'username': os.environ.get('USERNAME', ''),
             'password': os.environ.get('PASSWORD', ''),
             'update_interval': int(os.environ.get('UPDATE_INTERVAL', '2592000')),  # 30 days
+            'main_meter_number': os.environ.get('MAIN_METER_NUMBER', ''),
             'main_meter_name': os.environ.get('MAIN_METER_NAME', 'Main'),
+            'garden_meter_number': os.environ.get('GARDEN_METER_NUMBER', ''),
             'garden_meter_name': os.environ.get('GARDEN_METER_NAME', 'Garden')
         }
 
 
-def identify_meter_type(meter_number: str, all_meters: List[Dict]) -> str:
+def identify_meter_type(meter_number: str, config: Dict) -> str:
     """
-    Identify if a meter is the main or garden meter.
-    Uses simple logic: first meter alphabetically is main, second is garden.
-    This can be improved with configuration or naming patterns.
-    """
-    sorted_meters = sorted(all_meters, key=lambda m: m['meter_number'])
-    meter_numbers = [m['meter_number'] for m in sorted_meters]
+    Identify if a meter is the main or garden meter based on configuration.
 
-    if meter_number == meter_numbers[0]:
+    Args:
+        meter_number: The meter number to identify
+        config: Configuration dict with main_meter_number and garden_meter_number
+
+    Returns:
+        'main', 'garden', or 'unknown'
+    """
+    main_meter_number = config.get('main_meter_number', '').strip()
+    garden_meter_number = config.get('garden_meter_number', '').strip()
+
+    if main_meter_number and meter_number == main_meter_number:
         return 'main'
-    elif len(meter_numbers) > 1 and meter_number == meter_numbers[1]:
+    elif garden_meter_number and meter_number == garden_meter_number:
         return 'garden'
     else:
         return 'unknown'
@@ -476,10 +496,11 @@ def clear_manual_trigger():
 
 
 def fetch_and_update_meters(client: WAZNieplitzClient, ha_api: HomeAssistantAPI,
-                            main_meter_name: str, garden_meter_name: str,
+                            config: Dict,
                             historical_manager: Optional[HistoricalReadingsManager] = None) -> bool:
     """
     Fetch meter readings and update Home Assistant sensors.
+    Only creates sensors for meters configured in main_meter_number or garden_meter_number.
     Returns True if successful, False otherwise.
     """
     try:
@@ -495,19 +516,35 @@ def fetch_and_update_meters(client: WAZNieplitzClient, ha_api: HomeAssistantAPI,
             logger.warning("No meter readings found")
             return False
 
+        # Get configured meter numbers
+        main_meter_number = config.get('main_meter_number', '').strip()
+        garden_meter_number = config.get('garden_meter_number', '').strip()
+        main_meter_name = config.get('main_meter_name', 'Main')
+        garden_meter_name = config.get('garden_meter_name', 'Garden')
+
+        # Track which configured meters were found
+        found_main = False
+        found_garden = False
+
         # Update Home Assistant sensors
         for meter in meters:
-            meter_type = identify_meter_type(meter['meter_number'], meters)
+            meter_type = identify_meter_type(meter['meter_number'], config)
+
+            # Skip unconfigured meters
+            if meter_type == 'unknown':
+                logger.info(f"Skipping unconfigured meter: {meter['meter_number']}")
+                continue
 
             if meter_type == 'main':
                 entity_id = 'sensor.waz_nieplitz_water_main'
                 friendly_name = main_meter_name
+                found_main = True
             elif meter_type == 'garden':
                 entity_id = 'sensor.waz_nieplitz_water_garden'
                 friendly_name = garden_meter_name
+                found_garden = True
             else:
-                entity_id = f"sensor.waz_nieplitz_water_{meter['meter_number']}"
-                friendly_name = f"Water Meter {meter['meter_number']}"
+                continue  # Should not reach here, but skip just in case
 
             # Prepare attributes
             attributes = {
@@ -549,6 +586,12 @@ def fetch_and_update_meters(client: WAZNieplitzClient, ha_api: HomeAssistantAPI,
             # Update sensor
             logger.info(f"Updating {entity_id} with state={meter['reading']} (type: {type(meter['reading']).__name__})")
             ha_api.update_sensor(entity_id, meter['reading'], attributes)
+
+        # Warn if configured meters were not found
+        if main_meter_number and not found_main:
+            logger.warning(f"Configured main meter '{main_meter_number}' not found in portal readings")
+        if garden_meter_number and not found_garden:
+            logger.warning(f"Configured garden meter '{garden_meter_number}' not found in portal readings")
 
         return True
 
@@ -609,6 +652,75 @@ def process_historical_command(historical_manager: HistoricalReadingsManager):
             pass
 
 
+# Flask routes
+@app.route('/')
+def index():
+    """Serve the main page."""
+    try:
+        return send_file('/index.html')
+    except:
+        return """
+        <!DOCTYPE html>
+        <html><body style="font-family: sans-serif; padding: 20px;">
+        <h1>WAZ Nieplitz Water Meter</h1>
+        <p>Web interface file not found. Please check installation.</p>
+        </body></html>
+        """, 404
+
+
+@app.route('/fetch', methods=['POST'])
+def fetch():
+    """Trigger manual fetch."""
+    try:
+        if app_state['fetch_callback']:
+            # Trigger manual fetch
+            success = app_state['fetch_callback']()
+            if success:
+                app_state['last_fetch'] = datetime.now().isoformat()
+                return jsonify({
+                    'success': True,
+                    'message': 'Readings fetched successfully'
+                })
+            else:
+                return jsonify({
+                    'success': False,
+                    'message': 'Failed to fetch readings. Check add-on logs for details.'
+                }), 500
+        else:
+            return jsonify({
+                'success': False,
+                'message': 'Fetch callback not initialized'
+            }), 500
+    except Exception as e:
+        logger.error(f"Error in fetch route: {e}")
+        return jsonify({
+            'success': False,
+            'message': str(e)
+        }), 500
+
+
+@app.route('/status')
+def status():
+    """Get current status."""
+    return jsonify({
+        'last_fetch': app_state.get('last_fetch')
+    })
+
+
+def run_web_server():
+    """Run the Flask web server."""
+    try:
+        logger.info(f"Starting web server on port {INGRESS_PORT}")
+        # Disable Flask's default logging
+        import logging as flask_logging
+        flask_log = flask_logging.getLogger('werkzeug')
+        flask_log.setLevel(flask_logging.ERROR)
+
+        app.run(host='0.0.0.0', port=INGRESS_PORT, debug=False, use_reloader=False)
+    except Exception as e:
+        logger.error(f"Web server error: {e}")
+
+
 def main():
     """Main loop."""
     logger.info("Starting WAZ Nieplitz Water Meter Add-on")
@@ -619,8 +731,6 @@ def main():
     username = config.get('username', '')
     password = config.get('password', '')
     update_interval = config.get('update_interval', 2592000)  # Default: 30 days
-    main_meter_name = config.get('main_meter_name', 'Water Meter Main')
-    garden_meter_name = config.get('garden_meter_name', 'Water Meter Garden')
 
     if not username or not password:
         logger.error("Username and password must be configured")
@@ -635,9 +745,21 @@ def main():
     ha_api = HomeAssistantAPI()
     historical_manager = HistoricalReadingsManager()
 
+    # Set up fetch callback for web interface
+    def fetch_callback():
+        """Callback for web interface manual fetch."""
+        return fetch_and_update_meters(client, ha_api, config, historical_manager)
+
+    app_state['fetch_callback'] = fetch_callback
+
+    # Start web server in background thread
+    web_thread = threading.Thread(target=run_web_server, daemon=True)
+    web_thread.start()
+    logger.info("Web interface started")
+
     # Perform initial fetch
     logger.info("Performing initial meter reading fetch...")
-    fetch_and_update_meters(client, ha_api, main_meter_name, garden_meter_name, historical_manager)
+    fetch_and_update_meters(client, ha_api, config, historical_manager)
 
     # Calculate how many check intervals equal one update interval
     checks_per_update = update_interval // CHECK_INTERVAL
@@ -654,8 +776,9 @@ def main():
             if check_manual_trigger():
                 logger.info("Manual fetch triggered! Fetching readings immediately...")
                 clear_manual_trigger()
-                if fetch_and_update_meters(client, ha_api, main_meter_name, garden_meter_name, historical_manager):
+                if fetch_and_update_meters(client, ha_api, config, historical_manager):
                     logger.info("Manual fetch completed successfully")
+                    app_state['last_fetch'] = datetime.now().isoformat()
                     last_update_time = time.time()
                     check_counter = 0  # Reset counter after manual fetch
                 else:
@@ -664,8 +787,9 @@ def main():
             # Check if it's time for scheduled update
             elif check_counter >= checks_per_update:
                 logger.info("Scheduled update triggered")
-                if fetch_and_update_meters(client, ha_api, main_meter_name, garden_meter_name, historical_manager):
+                if fetch_and_update_meters(client, ha_api, config, historical_manager):
                     logger.info("Scheduled update completed successfully")
+                    app_state['last_fetch'] = datetime.now().isoformat()
                     last_update_time = time.time()
                     check_counter = 0
                 else:
