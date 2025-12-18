@@ -259,37 +259,36 @@ class WAZNieplitzClient:
                 return []
 
             meters = {}
-            current_meter = None
 
-            # Parse table rows
+            # Parse table rows - collect ALL readings per meter
             rows = table.find_all('tr', class_='item')
             for row in rows:
                 # Extract meter number
                 meter_cell = row.find('td', class_='zaehler')
                 if meter_cell:
-                    meter_number = meter_cell.get_text(strip=True).replace('Zähler', '')
+                    meter_number = meter_cell.get_text(strip=True).replace('Zähler', '').strip()
 
-                    # Extract reading date
+                    # Extract reading date (Ablesetag)
                     ablesetag_cell = row.find('td', class_='ablesetag')
-                    ablesetag = ablesetag_cell.get_text(strip=True).replace('Ablesetag', '') if ablesetag_cell else ''
+                    ablesetag = ablesetag_cell.get_text(strip=True).replace('Ablesetag', '').strip() if ablesetag_cell else ''
 
                     # Extract reference date (Stichtag)
                     stichtag_cell = row.find('td', class_='stichtag')
-                    stichtag = stichtag_cell.get_text(strip=True).replace('Stichtag', '') if stichtag_cell else ''
+                    stichtag = stichtag_cell.get_text(strip=True).replace('Stichtag', '').strip() if stichtag_cell else ''
 
                     # Extract meter reading (Stand)
                     stand_cell = row.find('td', class_='stand')
-                    stand = stand_cell.get_text(strip=True).replace('Stand', '') if stand_cell else '0'
+                    stand = stand_cell.get_text(strip=True).replace('Stand', '').replace('m³', '').strip() if stand_cell else '0'
 
                     # Extract consumption (Verbrauch)
                     verbrauch_cell = row.find('td', class_='verbrauch')
-                    verbrauch = verbrauch_cell.get_text(strip=True).replace('Verbrauch (m³)', '') if verbrauch_cell else '0'
+                    verbrauch = verbrauch_cell.get_text(strip=True).replace('Verbrauch (m³)', '').replace('m³', '').strip() if verbrauch_cell else '0'
 
                     # Extract reading type
                     ablesart_cell = row.find('td', class_='ablesart')
-                    ablesart = ablesart_cell.get_text(strip=True).replace('Ableseart', '') if ablesart_cell else ''
+                    ablesart = ablesart_cell.get_text(strip=True).replace('Ableseart', '').strip() if ablesart_cell else ''
 
-                    # Parse reading date
+                    # Parse reading date (Ablesetag)
                     reading_date = None
                     if ablesetag:
                         try:
@@ -297,7 +296,7 @@ class WAZNieplitzClient:
                         except:
                             pass
 
-                    # Parse reference date
+                    # Parse reference date (Stichtag)
                     reference_date = None
                     if stichtag:
                         try:
@@ -305,35 +304,58 @@ class WAZNieplitzClient:
                         except:
                             pass
 
-                    # Store or update meter data (keep only the most recent reading per meter)
+                    # Determine primary date: prioritize Ablesetag over Stichtag
+                    primary_date = reading_date if reading_date else reference_date
+
+                    # Parse reading value
+                    reading_value = int(stand) if stand.replace(',', '').replace('.', '').isdigit() else 0
+                    consumption_value = int(verbrauch) if verbrauch.replace(',', '').replace('.', '').isdigit() else 0
+
+                    # Create reading entry
+                    reading_entry = {
+                        'date': primary_date.isoformat() if primary_date else None,
+                        'reading': reading_value,
+                        'consumption': consumption_value,
+                        'reading_type': ablesart,
+                        'reading_date': reading_date.isoformat() if reading_date else None,
+                        'reference_date': reference_date.isoformat() if reference_date else None
+                    }
+
+                    # Initialize meter if not exists
                     if meter_number not in meters:
                         meters[meter_number] = {
                             'meter_number': meter_number,
                             'reading_date': reading_date,
                             'reference_date': reference_date,
-                            'reading': int(stand) if stand.isdigit() else 0,
-                            'consumption': int(verbrauch) if verbrauch.isdigit() else 0,
-                            'reading_type': ablesart
+                            'primary_date': primary_date,
+                            'reading': reading_value,
+                            'consumption': consumption_value,
+                            'reading_type': ablesart,
+                            'portal_readings': [reading_entry]
                         }
                     else:
-                        # Update if this reading is more recent
+                        # Add this reading to the portal readings list
+                        meters[meter_number]['portal_readings'].append(reading_entry)
+
+                        # Update current reading if this one is more recent
                         existing = meters[meter_number]
-                        if reference_date and existing.get('reference_date'):
-                            if reference_date > existing['reference_date']:
-                                meters[meter_number] = {
-                                    'meter_number': meter_number,
+                        if primary_date and existing.get('primary_date'):
+                            if primary_date > existing['primary_date']:
+                                meters[meter_number].update({
                                     'reading_date': reading_date,
                                     'reference_date': reference_date,
-                                    'reading': int(stand) if stand.isdigit() else 0,
-                                    'consumption': int(verbrauch) if verbrauch.isdigit() else 0,
+                                    'primary_date': primary_date,
+                                    'reading': reading_value,
+                                    'consumption': consumption_value,
                                     'reading_type': ablesart
-                                }
+                                })
 
             result = list(meters.values())
             logger.info(f"Found {len(result)} meter(s)")
             for meter in result:
+                portal_count = len(meter.get('portal_readings', []))
                 logger.info(f"Meter {meter['meter_number']}: {meter['reading']} m³ "
-                          f"(Reference date: {meter['reference_date']})")
+                          f"({portal_count} portal reading(s), Date: {meter.get('primary_date')})")
 
             return result
 
@@ -396,8 +418,8 @@ def load_config() -> Dict:
             'username': os.environ.get('USERNAME', ''),
             'password': os.environ.get('PASSWORD', ''),
             'update_interval': int(os.environ.get('UPDATE_INTERVAL', '2592000')),  # 30 days
-            'main_meter_name': os.environ.get('MAIN_METER_NAME', 'Water Meter Main'),
-            'garden_meter_name': os.environ.get('GARDEN_METER_NAME', 'Water Meter Garden')
+            'main_meter_name': os.environ.get('MAIN_METER_NAME', 'Main'),
+            'garden_meter_name': os.environ.get('GARDEN_METER_NAME', 'Garden')
         }
 
 
@@ -483,6 +505,18 @@ def fetch_and_update_meters(client: WAZNieplitzClient, ha_api: HomeAssistantAPI,
                 attributes['reading_date'] = meter['reading_date'].isoformat()
             if meter['reference_date']:
                 attributes['reference_date'] = meter['reference_date'].isoformat()
+
+            # Add portal readings to attributes
+            if 'portal_readings' in meter and meter['portal_readings']:
+                # Sort portal readings by date (newest first)
+                sorted_readings = sorted(
+                    meter['portal_readings'],
+                    key=lambda x: x['date'] if x['date'] else '',
+                    reverse=True
+                )
+                attributes['portal_readings'] = sorted_readings
+                attributes['portal_readings_count'] = len(sorted_readings)
+                logger.info(f"Meter {meter['meter_number']}: {len(sorted_readings)} portal reading(s)")
 
             # Add historical readings to attributes
             if historical_manager:

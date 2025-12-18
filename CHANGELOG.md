@@ -2,6 +2,30 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.2.6] - 2025-12-18
+
+### Fixed
+- **Critical:** Fixed date logic to prioritize Ablesetag (reading day) over Stichtag (reference day)
+  - Now correctly uses actual reading date when available
+  - Falls back to reference date only when reading date is not present
+  - This ensures the correct date is displayed for each reading
+
+### Changed
+- **Default sensor names simplified** to "Main" and "Garden" (was "Water Meter Main" and "Water Meter Garden")
+- **All portal readings now captured** instead of just the most recent
+  - Every reading from the portal table is now stored
+  - Readings sorted by date (newest first)
+  - Available in sensor attributes as `portal_readings` array
+  - Count available as `portal_readings_count` attribute
+
+### Improved
+- Better number parsing for readings with various formats
+- More detailed logging showing portal readings count per meter
+- Sensor attributes now include complete historical data from portal
+
+### Note
+Home Assistant graphs require data accumulated over time while the add-on is running. Portal readings are visible in sensor attributes but won't appear in historical graphs until new readings are collected during add-on operation.
+
 ## [1.2.5] - 2025-12-18
 
 ### Fixed
