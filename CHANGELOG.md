@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.2.4] - 2025-12-17
+
+### Fixed
+- **Critical:** Corrected login URL
+  - Changed LOGIN_URL from `{BASE_URL}/login` to just `{BASE_URL}`
+  - Login form is at https://kundenportal.waz-nieplitz.de/ (root), not /login
+  - Previous URL was returning 404
+
 ## [1.2.3] - 2025-12-17
 
 ### Fixed

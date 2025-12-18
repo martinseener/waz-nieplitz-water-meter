@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 # Constants
 BASE_URL = "https://kundenportal.waz-nieplitz.de"
-LOGIN_URL = f"{BASE_URL}/login"
+LOGIN_URL = BASE_URL  # Login form is at the root
 READINGS_URL = f"{BASE_URL}/ablesungen"
 SUPERVISOR_TOKEN = os.environ.get("SUPERVISOR_TOKEN")
 HA_URL = "http://supervisor/core/api"
