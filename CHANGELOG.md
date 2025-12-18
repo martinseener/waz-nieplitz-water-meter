@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.4.4] - 2025-12-18
+
+### Fixed
+- **Statistics import 400 Bad Request error**
+  - Replaced deprecated `has_mean` boolean with new `mean_type` integer parameter (0 = no mean)
+  - Changed `statistic_id` format from `sensor.xxx` to `sensor:xxx` for external statistics
+  - External statistics use `:` delimiter instead of `.` per HA API specification
+  - Fixes compatibility with latest Home Assistant recorder API changes
+
+### Technical
+- Based on HA Developer Blog (Oct 2025) API changes
+- `mean_type` replaces deprecated `has_mean` flag (0=no mean, 1=arithmetic, 2=circular)
+- External statistics require different ID format than entity-based statistics
+- See: https://developers.home-assistant.io/blog/2025/10/16/recorder-statistics-api-changes/
+- See: https://data.home-assistant.io/docs/statistics/
+
 ## [1.4.3] - 2025-12-18
 
 ### Fixed

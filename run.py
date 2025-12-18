@@ -499,20 +499,26 @@ class HomeAssistantAPI:
                 return False
 
             # Call recorder.import_statistics service
-            # Note: As of HA 2025.11, unit_class is required
+            # Note: As of HA 2025.11, unit_class is required and mean_type replaces has_mean
             # See: https://developers.home-assistant.io/blog/2025/10/16/recorder-statistics-api-changes/
+            # For external statistics, statistic_id uses ':' instead of '.' as delimiter
+
+            # Convert entity_id format from 'sensor.xxx' to 'sensor:xxx' for external statistics
+            statistic_id = entity_id.replace('.', ':', 1) if '.' in entity_id else entity_id
+
             service_data = {
-                "statistic_id": entity_id,
+                "statistic_id": statistic_id,
                 "name": friendly_name,
                 "source": "recorder",
                 "unit_of_measurement": "m³",
-                "has_mean": False,
+                "mean_type": 0,  # 0 = no mean, 1 = arithmetic mean, 2 = circular mean (replaces has_mean)
                 "has_sum": True,  # This is a cumulative sensor
                 "unit_class": None,  # Required as of HA 2025.11 - no unit converter for water
                 "stats": stats
             }
 
-            logger.info(f"Importing {len(stats)} statistics for {entity_id} ({stats[0]['start']} to {stats[-1]['start']})")
+            logger.info(f"Importing {len(stats)} statistics for {statistic_id} (entity: {entity_id})")
+            logger.info(f"Date range: {stats[0]['start']} to {stats[-1]['start']}")
             url = f"{HA_URL}/services/recorder/import_statistics"
 
             # Log first and last stat for debugging
