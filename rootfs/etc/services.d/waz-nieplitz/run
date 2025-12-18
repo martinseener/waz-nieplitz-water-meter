@@ -1,0 +1,9 @@
+#!/usr/bin/with-contenv bashio
+# ==============================================================================
+# Start the WAZ Nieplitz Water Meter service
+# ==============================================================================
+
+bashio::log.info "Starting WAZ Nieplitz Water Meter add-on..."
+
+# Run the Python script
+exec python3 -u /app/run.py

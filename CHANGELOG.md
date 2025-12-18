@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.2.1] - 2025-12-17
+
+### Fixed
+- **Critical:** Fixed s6-overlay compatibility issue
+  - Removed CMD override from Dockerfile that caused "can only run as pid 1" error
+  - Added proper s6 service structure with rootfs/etc/services.d/
+  - Add-on now starts correctly in Home Assistant
+
+### Changed
+- Moved run.py to /app/ directory
+- Added s6 run and finish scripts for proper service management
+
 ## [1.2.0] - 2025-12-17
 
 ### Added

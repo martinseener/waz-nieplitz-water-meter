@@ -15,13 +15,11 @@ RUN \
         py3-dateutil
 
 # Copy data for add-on
-COPY run.py /
+COPY run.py /app/
 COPY requirements.txt /tmp/
 
 # Install Python packages
 RUN pip3 install --no-cache-dir -r /tmp/requirements.txt
 
-# Make script executable
-RUN chmod a+x /run.py
-
-CMD [ "python3", "-u", "/run.py" ]
+# Copy root filesystem
+COPY rootfs /
