@@ -450,7 +450,7 @@ class HomeAssistantAPI:
 
     def import_statistics(self, entity_id: str, friendly_name: str, readings: List[Dict]) -> bool:
         """
-        Import historical statistics for energy/utility sensors.
+        Import historical statistics for energy/utility sensors using WebSocket API.
         This allows the Energy Dashboard to show historical data correctly.
 
         Args:
@@ -486,11 +486,11 @@ class HomeAssistantAPI:
                     logger.warning(f"Could not parse date: {reading['date']} - {e}")
                     continue
 
-                # For total_increasing sensors with has_sum=True
-                # Only include 'sum', not 'state' (state is for mean statistics)
+                # For total_increasing sensors
+                # Include 'sum' for cumulative value
                 stat_entry = {
                     "start": date_obj.isoformat(),
-                    "sum": float(reading['reading'])  # Cumulative value for total sensors
+                    "sum": float(reading['reading'])
                 }
                 stats.append(stat_entry)
 
@@ -498,50 +498,72 @@ class HomeAssistantAPI:
                 logger.warning(f"No valid statistics to import for {entity_id}")
                 return False
 
-            # Call recorder.import_statistics service
-            # Note: As of HA 2025.11, unit_class is required and mean_type replaces has_mean
-            # See: https://developers.home-assistant.io/blog/2025/10/16/recorder-statistics-api-changes/
+            # Use WebSocket API to import statistics
             # For external statistics, statistic_id uses ':' instead of '.' as delimiter
-
-            # Convert entity_id format from 'sensor.xxx' to 'sensor:xxx' for external statistics
             statistic_id = entity_id.replace('.', ':', 1) if '.' in entity_id else entity_id
-
-            service_data = {
-                "statistic_id": statistic_id,
-                "name": friendly_name,
-                "source": "recorder",
-                "unit_of_measurement": "m³",
-                "mean_type": 0,  # 0 = no mean, 1 = arithmetic mean, 2 = circular mean (replaces has_mean)
-                "has_sum": True,  # This is a cumulative sensor
-                "unit_class": None,  # Required as of HA 2025.11 - no unit converter for water
-                "stats": stats
-            }
 
             logger.info(f"Importing {len(stats)} statistics for {statistic_id} (entity: {entity_id})")
             logger.info(f"Date range: {stats[0]['start']} to {stats[-1]['start']}")
-            url = f"{HA_URL}/services/recorder/import_statistics"
 
-            # Log first and last stat for debugging
-            logger.info(f"Sample stat entry (first): {stats[0]}")
-            logger.info(f"Sample stat entry (last): {stats[-1]}")
-            logger.info(f"Service data: {service_data}")
+            # Import via WebSocket API
+            import websocket
+            import ssl
 
-            response = requests.post(url, headers=self.headers, json=service_data, timeout=30)
-            response.raise_for_status()
+            # Connect to Home Assistant WebSocket
+            ws_url = f"ws://supervisor/core/websocket"
+            ws = websocket.create_connection(ws_url, timeout=30)
 
-            logger.info(f"Successfully imported statistics for {entity_id}")
-            return True
+            try:
+                # Receive auth_required message
+                result = json.loads(ws.recv())
+                if result['type'] != 'auth_required':
+                    raise Exception(f"Expected auth_required, got {result['type']}")
+
+                # Send auth message
+                ws.send(json.dumps({
+                    'type': 'auth',
+                    'access_token': self.token
+                }))
+
+                # Receive auth response
+                result = json.loads(ws.recv())
+                if result['type'] != 'auth_ok':
+                    raise Exception(f"Authentication failed: {result}")
+
+                # Send import_statistics command
+                command = {
+                    'id': 1,
+                    'type': 'recorder/import_statistics',
+                    'metadata': {
+                        'has_mean': False,
+                        'has_sum': True,
+                        'name': friendly_name,
+                        'source': 'recorder',
+                        'statistic_id': statistic_id,
+                        'unit_of_measurement': 'm³'
+                    },
+                    'stats': stats
+                }
+
+                logger.info(f"WebSocket command: {command}")
+                ws.send(json.dumps(command))
+
+                # Receive response
+                result = json.loads(ws.recv())
+                logger.info(f"WebSocket response: {result}")
+
+                if result.get('success'):
+                    logger.info(f"Successfully imported statistics for {entity_id}")
+                    return True
+                else:
+                    logger.error(f"Failed to import statistics: {result}")
+                    return False
+
+            finally:
+                ws.close()
 
         except Exception as e:
             logger.error(f"Error importing statistics for {entity_id}: {e}")
-            if hasattr(e, 'response') and e.response is not None:
-                logger.error(f"Response status: {e.response.status_code}")
-                logger.error(f"Response body: {e.response.text}")
-                try:
-                    error_json = e.response.json()
-                    logger.error(f"Error details: {error_json}")
-                except:
-                    pass
             return False
 
 
@@ -979,12 +1001,21 @@ def run_web_server():
     """Run the Flask web server."""
     try:
         logger.info(f"Starting web server on port {INGRESS_PORT}")
-        # Disable Flask's default logging
+        # Disable Flask's default logging completely
         import logging as flask_logging
+        import sys
+        import os
+
+        # Disable werkzeug logging
         flask_log = flask_logging.getLogger('werkzeug')
         flask_log.setLevel(flask_logging.ERROR)
+        flask_log.disabled = True
 
-        app.run(host='0.0.0.0', port=INGRESS_PORT, debug=False, use_reloader=False)
+        # Disable Flask's CLI output by redirecting to devnull during startup
+        cli = sys.modules['flask.cli']
+        cli.show_server_banner = lambda *x: None
+
+        app.run(host='0.0.0.0', port=INGRESS_PORT, debug=False, use_reloader=False, threaded=True)
     except Exception as e:
         logger.error(f"Web server error: {e}")
 

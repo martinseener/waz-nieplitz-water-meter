@@ -2,6 +2,31 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.5.0] - 2025-12-18
+
+### Changed
+- **Statistics import now uses WebSocket API instead of REST API**
+  - No longer requires Spook or other custom integrations
+  - Native Home Assistant WebSocket API for recorder/import_statistics
+  - More reliable and follows HA's recommended approach
+  - Uses `recorder/import_statistics` WebSocket command directly
+
+### Fixed
+- **Flask web interface JSON response issues**
+  - Completely disabled werkzeug logging that was interfering with HTTP responses
+  - Added threaded mode to Flask for better concurrency
+  - Fixed "unexpected character" JSON parse errors in browser
+  - Meter dropdown should now populate correctly
+
+### Added
+- websocket-client library for WebSocket communication with HA Core
+
+### Technical
+- WebSocket connects to `ws://supervisor/core/websocket`
+- Authenticates using Supervisor API token
+- Sends `recorder/import_statistics` command with metadata and stats
+- External statistics use `:` delimiter in statistic_id (e.g., `sensor:waz_nieplitz_water_main`)
+
 ## [1.4.4] - 2025-12-18
 
 ### Fixed
