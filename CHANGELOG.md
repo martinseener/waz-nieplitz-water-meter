@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.2.3] - 2025-12-17
+
+### Fixed
+- **Critical:** Added required s6-overlay v3 compatibility fixes
+  - Added `CMD [ "/run.sh" ]` to Dockerfile (required for s6-overlay v3)
+  - Added `"init": false` to config.json (disables Docker's init, allows s6-overlay as PID 1)
+  - These changes are required for Home Assistant base images updated in May 2022
+
+### Technical Details
+This resolves the "s6-overlay-suexec: fatal: can only run as pid 1" error that occurs
+with s6-overlay v3. The error happened because:
+1. Missing CMD prevented Docker from knowing what to execute
+2. Missing "init": false allowed Docker's default init to claim PID 1, blocking s6-overlay
+
+Based on official Home Assistant add-on documentation and working examples from
+the home-assistant/addons repository.
+
 ## [1.2.2] - 2025-12-17
 
 ### Fixed
