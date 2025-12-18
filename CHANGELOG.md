@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.5.2] - 2025-12-18
+
+### Fixed
+- **CRITICAL: Statistics import "Invalid source" error resolved**
+  - Root cause: Home Assistant requires source parameter to match statistic_id domain
+  - Changed statistic_id from `sensor:waz_nieplitz_water_main` to `waz_nieplitz:water_main`
+  - Source `waz_nieplitz` now matches domain extracted from statistic_id
+  - Statistics import should now succeed via WebSocket API
+
+### Added
+- Added mean_type and unit_class fields to metadata for HA 2025.11 compatibility
+
+### Technical
+- For external statistics, split_statistic_id extracts domain from "domain:object_id" format
+- Home Assistant's async_add_external_statistics validates: `source == domain`
+- Statistics will now appear as `waz_nieplitz:water_main` and `waz_nieplitz:water_garden`
+- See: homeassistant/components/recorder/statistics.py:async_add_external_statistics
+
 ## [1.5.1] - 2025-12-18
 
 ### Fixed

@@ -500,7 +500,16 @@ class HomeAssistantAPI:
 
             # Use WebSocket API to import statistics
             # For external statistics, statistic_id uses ':' instead of '.' as delimiter
-            statistic_id = entity_id.replace('.', ':', 1) if '.' in entity_id else entity_id
+            # IMPORTANT: The domain (part before :) MUST match the source parameter
+            # Convert sensor.waz_nieplitz_water_main -> waz_nieplitz:water_main
+            if '.' in entity_id:
+                _, object_id = entity_id.split('.', 1)
+                # Remove waz_nieplitz_ prefix from object_id if present
+                if object_id.startswith('waz_nieplitz_water_'):
+                    object_id = 'water_' + object_id[len('waz_nieplitz_water_'):]
+                statistic_id = f"waz_nieplitz:{object_id}"
+            else:
+                statistic_id = entity_id
 
             logger.info(f"Importing {len(stats)} statistics for {statistic_id} (entity: {entity_id})")
             logger.info(f"Date range: {stats[0]['start']} to {stats[-1]['start']}")
@@ -531,18 +540,20 @@ class HomeAssistantAPI:
                     raise Exception(f"Authentication failed: {result}")
 
                 # Send import_statistics command
-                # Note: source must be a custom integration name, not 'recorder'
-                # For external statistics, use the add-on slug
+                # Note: As of HA 2025.11, metadata uses mean_type instead of has_mean
+                # For external statistics, source should be a custom integration name
                 command = {
                     'id': 1,
                     'type': 'recorder/import_statistics',
                     'metadata': {
-                        'has_mean': False,
+                        'has_mean': False,  # Still include for backwards compatibility
                         'has_sum': True,
+                        'mean_type': 0,  # 0=no mean, 1=arithmetic, 2=circular (new API)
                         'name': friendly_name,
                         'source': 'waz_nieplitz',
                         'statistic_id': statistic_id,
-                        'unit_of_measurement': 'm³'
+                        'unit_of_measurement': 'm³',
+                        'unit_class': None  # Required as of HA 2025.11
                     },
                     'stats': stats
                 }
