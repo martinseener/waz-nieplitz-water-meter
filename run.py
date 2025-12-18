@@ -307,9 +307,22 @@ class WAZNieplitzClient:
                     # Determine primary date: prioritize Ablesetag over Stichtag
                     primary_date = reading_date if reading_date else reference_date
 
-                    # Parse reading value
-                    reading_value = int(stand) if stand.replace(',', '').replace('.', '').isdigit() else 0
-                    consumption_value = int(verbrauch) if verbrauch.replace(',', '').replace('.', '').isdigit() else 0
+                    # Parse reading value - remove commas and handle decimal points
+                    try:
+                        # Remove spaces and replace comma with dot for European format
+                        cleaned_stand = stand.replace(' ', '').replace(',', '.')
+                        reading_value = int(float(cleaned_stand))
+                    except (ValueError, AttributeError):
+                        reading_value = 0
+                        logger.warning(f"Could not parse reading value: '{stand}'")
+
+                    # Parse consumption value
+                    try:
+                        cleaned_verbrauch = verbrauch.replace(' ', '').replace(',', '.')
+                        consumption_value = int(float(cleaned_verbrauch))
+                    except (ValueError, AttributeError):
+                        consumption_value = 0
+                        logger.warning(f"Could not parse consumption value: '{verbrauch}'")
 
                     # Create reading entry
                     reading_entry = {
@@ -379,19 +392,26 @@ class HomeAssistantAPI:
         """Update or create a sensor in Home Assistant."""
         try:
             url = f"{HA_URL}/states/{entity_id}"
+            # Convert state to string as HA expects
+            state_str = str(state)
             data = {
-                'state': state,
+                'state': state_str,
                 'attributes': attributes
             }
 
+            logger.debug(f"Sending to HA: entity={entity_id}, state={state_str}")
             response = requests.post(url, headers=self.headers, json=data, timeout=10)
             response.raise_for_status()
 
             logger.info(f"Updated sensor {entity_id}: {state}")
+            logger.debug(f"HA Response: {response.status_code}")
             return True
 
         except Exception as e:
             logger.error(f"Error updating sensor {entity_id}: {e}")
+            if hasattr(e, 'response') and e.response is not None:
+                logger.error(f"Response status: {e.response.status_code}")
+                logger.error(f"Response body: {e.response.text}")
             return False
 
     def register_service(self, domain: str, service: str, service_data: Dict) -> bool:
@@ -527,6 +547,7 @@ def fetch_and_update_meters(client: WAZNieplitzClient, ha_api: HomeAssistantAPI,
                     logger.info(f"Meter {meter['meter_number']}: {len(historical_readings)} historical reading(s)")
 
             # Update sensor
+            logger.info(f"Updating {entity_id} with state={meter['reading']} (type: {type(meter['reading']).__name__})")
             ha_api.update_sensor(entity_id, meter['reading'], attributes)
 
         return True

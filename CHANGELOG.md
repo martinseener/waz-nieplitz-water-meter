@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.2.7] - 2025-12-18
+
+### Fixed
+- **Critical:** Fixed number parsing bug causing sensors to show 0 m³
+  - Previous version was checking cleaned string but converting uncleaned string
+  - Now properly converts cleaned strings with float() then int()
+  - Handles European number formats (comma as decimal separator)
+  - Handles spaces in numbers
+  - Added try/except with warning logs for unparseable values
+- Fixed state type sent to Home Assistant (now properly converted to string)
+- Added comprehensive error logging for API responses
+
+### Improved
+- Enhanced logging with state type information
+- Better error messages showing parsing failures
+- Debug logging for HA API communication
+- More robust number parsing with proper exception handling
+
 ## [1.2.6] - 2025-12-18
 
 ### Fixed
