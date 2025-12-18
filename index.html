@@ -414,26 +414,50 @@
         // Load configuration and historical readings
         async function loadConfig() {
             try {
+                console.log('Loading config from /config endpoint...');
                 const response = await fetch('/config');
+
+                if (!response.ok) {
+                    console.error('Config fetch failed:', response.status, response.statusText);
+                    return;
+                }
+
                 const data = await response.json();
+                console.log('Config loaded:', data);
                 config = data;
 
                 // Populate meter dropdown
                 const meterSelect = document.getElementById('meter');
                 meterSelect.innerHTML = '<option value="">Select meter...</option>';
 
-                if (data.main_meter_number) {
+                let metersAdded = 0;
+
+                if (data.main_meter_number && data.main_meter_number.trim() !== '') {
+                    console.log('Adding main meter:', data.main_meter_number);
                     const option = document.createElement('option');
-                    option.value = data.main_meter_number;
-                    option.textContent = `${data.main_meter_name || 'Main'} (${data.main_meter_number})`;
+                    option.value = data.main_meter_number.trim();
+                    option.textContent = `${data.main_meter_name || 'Main'} (${data.main_meter_number.trim()})`;
                     meterSelect.appendChild(option);
+                    metersAdded++;
+                } else {
+                    console.log('No main meter configured');
                 }
 
-                if (data.garden_meter_number) {
+                if (data.garden_meter_number && data.garden_meter_number.trim() !== '') {
+                    console.log('Adding garden meter:', data.garden_meter_number);
                     const option = document.createElement('option');
-                    option.value = data.garden_meter_number;
-                    option.textContent = `${data.garden_meter_name || 'Garden'} (${data.garden_meter_number})`;
+                    option.value = data.garden_meter_number.trim();
+                    option.textContent = `${data.garden_meter_name || 'Garden'} (${data.garden_meter_number.trim()})`;
                     meterSelect.appendChild(option);
+                    metersAdded++;
+                } else {
+                    console.log('No garden meter configured');
+                }
+
+                console.log(`Total meters added to dropdown: ${metersAdded}`);
+
+                if (metersAdded === 0) {
+                    console.warn('No meters configured! Please configure meter numbers in add-on settings.');
                 }
             } catch (error) {
                 console.error('Error loading config:', error);

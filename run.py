@@ -448,6 +448,78 @@ class HomeAssistantAPI:
             logger.error(f"Error registering service {domain}.{service}: {e}")
             return False
 
+    def import_statistics(self, entity_id: str, friendly_name: str, readings: List[Dict]) -> bool:
+        """
+        Import historical statistics for energy/utility sensors.
+        This allows the Energy Dashboard to show historical data correctly.
+
+        Args:
+            entity_id: The sensor entity ID
+            friendly_name: Friendly name for the statistic
+            readings: List of readings with 'date' and 'reading' keys
+
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            if not readings:
+                logger.warning(f"No readings to import for {entity_id}")
+                return False
+
+            # Sort readings by date
+            sorted_readings = sorted(readings, key=lambda x: x.get('date', ''))
+
+            # Build statistics data
+            stats = []
+            for reading in sorted_readings:
+                if not reading.get('date') or reading.get('reading') is None:
+                    continue
+
+                # Convert date to timestamp
+                try:
+                    date_obj = datetime.fromisoformat(reading['date'].replace('Z', '+00:00'))
+                except:
+                    logger.warning(f"Could not parse date: {reading['date']}")
+                    continue
+
+                # For total_increasing sensors, use 'sum' which represents the cumulative value
+                stat_entry = {
+                    "start": date_obj.isoformat(),
+                    "state": float(reading['reading']),
+                    "sum": float(reading['reading'])  # Cumulative value for total sensors
+                }
+                stats.append(stat_entry)
+
+            if not stats:
+                logger.warning(f"No valid statistics to import for {entity_id}")
+                return False
+
+            # Call recorder.import_statistics service
+            service_data = {
+                "statistic_id": entity_id,
+                "name": friendly_name,
+                "unit_of_measurement": "m³",
+                "has_mean": False,
+                "has_sum": True,  # This is a cumulative sensor
+                "stats": stats
+            }
+
+            logger.info(f"Importing {len(stats)} statistics for {entity_id} ({stats[0]['start']} to {stats[-1]['start']})")
+            url = f"{HA_URL}/services/recorder/import_statistics"
+            logger.debug(f"Calling {url} with {len(stats)} stats")
+            response = requests.post(url, headers=self.headers, json=service_data, timeout=30)
+            response.raise_for_status()
+
+            logger.info(f"Successfully imported statistics for {entity_id}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Error importing statistics for {entity_id}: {e}")
+            if hasattr(e, 'response') and e.response is not None:
+                logger.error(f"Response status: {e.response.status_code}")
+                logger.error(f"Response body: {e.response.text}")
+            return False
+
 
 def load_config() -> Dict:
     """Load add-on configuration."""
@@ -595,6 +667,24 @@ def fetch_and_update_meters(client: WAZNieplitzClient, ha_api: HomeAssistantAPI,
             # Update sensor
             logger.info(f"Updating {entity_id} with state={meter['reading']} (type: {type(meter['reading']).__name__})")
             ha_api.update_sensor(entity_id, meter['reading'], attributes)
+
+            # Import statistics for Energy Dashboard historical graphs
+            all_readings = []
+
+            # Add portal readings
+            if 'portal_readings' in meter and meter['portal_readings']:
+                all_readings.extend(meter['portal_readings'])
+
+            # Add historical readings
+            if historical_manager:
+                historical_readings = historical_manager.get_readings(meter['meter_number'])
+                if historical_readings:
+                    all_readings.extend(historical_readings)
+
+            # Import statistics if we have readings
+            if all_readings:
+                logger.info(f"Importing {len(all_readings)} statistics for {entity_id}")
+                ha_api.import_statistics(entity_id, friendly_name, all_readings)
 
         # Warn if configured meters were not found
         if main_meter_number and not found_main:

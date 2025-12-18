@@ -2,6 +2,55 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.4.0] - 2025-12-18
+
+### Added
+- **🎉 Energy Dashboard Historical Graphs Support**
+  - Implemented `recorder.import_statistics` service integration
+  - Historical data now appears correctly in Energy Dashboard graphs
+  - All portal readings (2+ years) imported as statistics with correct timestamps
+  - Manual historical readings also imported as statistics
+  - Graphs now show actual historical consumption patterns
+
+### Fixed
+- **Energy Dashboard showing 0 m³**
+  - Statistics are now properly imported to HA's long-term database
+  - Energy Dashboard can correctly read and display historical data
+  - Consumption tracking works properly with statistical data
+
+### Improved
+- **Enhanced dropdown debugging**
+  - Added comprehensive JavaScript console logging
+  - Shows config loading status and meter detection
+  - Warns when no meters are configured
+  - Helps diagnose configuration issues
+
+- **Better statistics logging**
+  - Shows date range being imported
+  - Logs number of statistics per sensor
+  - Better error messages for statistics import failures
+
+### Technical
+- Added `import_statistics()` method to HomeAssistantAPI
+- Statistics include both 'state' and 'sum' for total_increasing sensors
+- Automatic combination of portal_readings + historical_readings
+- Statistics sorted by date before import
+- Proper timestamp formatting for HA's statistics database
+
+### How It Works
+1. Sensor state shows current reading (timestamp = now)
+2. All readings (portal + historical) stored in attributes
+3. **NEW:** All readings also imported as statistics with correct dates
+4. Energy Dashboard reads from statistics database
+5. Historical graphs now display correctly!
+
+### Migration
+After upgrading:
+1. The add-on will automatically import all historical statistics
+2. Energy Dashboard will show historical data immediately
+3. Check logs for "Importing X statistics" messages
+4. For dropdown issues, check browser console (F12) for debugging info
+
 ## [1.3.2] - 2025-12-18
 
 ### Fixed
