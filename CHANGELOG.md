@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.4.1] - 2025-12-18
+
+### Fixed
+- **Statistics import 400 error**
+  - Added required "source": "recorder" field to service call
+  - Added timezone information to all timestamps (UTC)
+  - Fixed timestamp formatting for HA's statistics API
+  - Enhanced error logging with JSON error details
+  - Added debug logging for sample stat entries
+
+### Technical
+- Timestamps now include timezone info (required by HA)
+- Service data now includes all required fields per HA API spec
+- Better error messages showing exact API response
+
 ## [1.4.0] - 2025-12-18
 
 ### Added

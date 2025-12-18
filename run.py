@@ -475,11 +475,15 @@ class HomeAssistantAPI:
                 if not reading.get('date') or reading.get('reading') is None:
                     continue
 
-                # Convert date to timestamp
+                # Convert date to timestamp with timezone
                 try:
                     date_obj = datetime.fromisoformat(reading['date'].replace('Z', '+00:00'))
-                except:
-                    logger.warning(f"Could not parse date: {reading['date']}")
+                    # Ensure timezone info is present (use UTC if not specified)
+                    if date_obj.tzinfo is None:
+                        from datetime import timezone
+                        date_obj = date_obj.replace(tzinfo=timezone.utc)
+                except Exception as e:
+                    logger.warning(f"Could not parse date: {reading['date']} - {e}")
                     continue
 
                 # For total_increasing sensors, use 'sum' which represents the cumulative value
@@ -495,9 +499,11 @@ class HomeAssistantAPI:
                 return False
 
             # Call recorder.import_statistics service
+            # Note: source must be 'recorder' for external statistics
             service_data = {
                 "statistic_id": entity_id,
                 "name": friendly_name,
+                "source": "recorder",
                 "unit_of_measurement": "m³",
                 "has_mean": False,
                 "has_sum": True,  # This is a cumulative sensor
@@ -506,7 +512,11 @@ class HomeAssistantAPI:
 
             logger.info(f"Importing {len(stats)} statistics for {entity_id} ({stats[0]['start']} to {stats[-1]['start']})")
             url = f"{HA_URL}/services/recorder/import_statistics"
-            logger.debug(f"Calling {url} with {len(stats)} stats")
+
+            # Log first stat for debugging
+            logger.debug(f"Sample stat entry: {stats[0]}")
+            logger.debug(f"Service data keys: {list(service_data.keys())}")
+
             response = requests.post(url, headers=self.headers, json=service_data, timeout=30)
             response.raise_for_status()
 
@@ -518,6 +528,11 @@ class HomeAssistantAPI:
             if hasattr(e, 'response') and e.response is not None:
                 logger.error(f"Response status: {e.response.status_code}")
                 logger.error(f"Response body: {e.response.text}")
+                try:
+                    error_json = e.response.json()
+                    logger.error(f"Error details: {error_json}")
+                except:
+                    pass
             return False
 
 
