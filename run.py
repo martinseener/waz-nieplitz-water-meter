@@ -486,10 +486,10 @@ class HomeAssistantAPI:
                     logger.warning(f"Could not parse date: {reading['date']} - {e}")
                     continue
 
-                # For total_increasing sensors, use 'sum' which represents the cumulative value
+                # For total_increasing sensors with has_sum=True
+                # Only include 'sum', not 'state' (state is for mean statistics)
                 stat_entry = {
                     "start": date_obj.isoformat(),
-                    "state": float(reading['reading']),
                     "sum": float(reading['reading'])  # Cumulative value for total sensors
                 }
                 stats.append(stat_entry)
@@ -499,7 +499,8 @@ class HomeAssistantAPI:
                 return False
 
             # Call recorder.import_statistics service
-            # Note: source must be 'recorder' for external statistics
+            # Note: As of HA 2025.11, unit_class is required
+            # See: https://developers.home-assistant.io/blog/2025/10/16/recorder-statistics-api-changes/
             service_data = {
                 "statistic_id": entity_id,
                 "name": friendly_name,
@@ -507,15 +508,17 @@ class HomeAssistantAPI:
                 "unit_of_measurement": "m³",
                 "has_mean": False,
                 "has_sum": True,  # This is a cumulative sensor
+                "unit_class": None,  # Required as of HA 2025.11 - no unit converter for water
                 "stats": stats
             }
 
             logger.info(f"Importing {len(stats)} statistics for {entity_id} ({stats[0]['start']} to {stats[-1]['start']})")
             url = f"{HA_URL}/services/recorder/import_statistics"
 
-            # Log first stat for debugging
-            logger.debug(f"Sample stat entry: {stats[0]}")
-            logger.debug(f"Service data keys: {list(service_data.keys())}")
+            # Log first and last stat for debugging
+            logger.info(f"Sample stat entry (first): {stats[0]}")
+            logger.info(f"Sample stat entry (last): {stats[-1]}")
+            logger.info(f"Service data: {service_data}")
 
             response = requests.post(url, headers=self.headers, json=service_data, timeout=30)
             response.raise_for_status()

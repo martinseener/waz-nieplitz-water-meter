@@ -2,6 +2,34 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.4.3] - 2025-12-18
+
+### Fixed
+- **HA 2025.11 API compatibility**
+  - Added required `unit_class` field (set to None for water meters)
+  - Fixes 400 Bad Request errors introduced in Home Assistant Core 2025.11
+  - Updated to comply with October 2025 recorder statistics API changes
+
+### Technical
+- Implemented breaking changes from HA Developer Blog (Oct 2025)
+- See: https://developers.home-assistant.io/blog/2025/10/16/recorder-statistics-api-changes/
+- Required fields: unit_class (None), has_mean (False), has_sum (True)
+- Stat entries: only 'start' and 'sum' fields (removed 'state')
+
+## [1.4.2] - 2025-12-18
+
+### Fixed
+- **Statistics format for has_sum sensors**
+  - Removed 'state' field from stat entries (only use 'sum' for cumulative sensors)
+  - 'state' field is for mean statistics, not sum statistics
+  - Stat entries now only contain 'start' and 'sum' fields
+
+### Improved
+- **Verbose logging for debugging**
+  - Logs complete service_data being sent to HA API
+  - Shows first and last stat entries
+  - Helps diagnose API format issues
+
 ## [1.4.1] - 2025-12-18
 
 ### Fixed
