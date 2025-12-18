@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.2.2] - 2025-12-17
+
+### Fixed
+- **Critical:** Simplified add-on structure to fix persistent s6-overlay error
+  - Removed complex rootfs/services.d structure
+  - Added simple run.sh wrapper script
+  - Reverted to copying files to root (/)
+  - Removed unnecessary apk packages from Dockerfile
+
+### Changed
+- Simplified Dockerfile significantly
+- Using run.sh as entry wrapper instead of direct CMD
+- Cleaner, more maintainable structure
+
 ## [1.2.1] - 2025-12-17
 
 ### Fixed
