@@ -203,17 +203,19 @@ class WAZNieplitzClient:
                 logger.error("Could not find login form")
                 return False
 
-            # Prepare login data
+            # Prepare login data with correct field names
             login_data = {
-                'username': self.username,
-                'password': self.password
+                'fieldLoginBenutzername': self.username,
+                'fieldLoginPasswort': self.password,
+                'fieldFormSent': 'formLogin',
+                'fieldSFileReferer': ''
             }
 
-            # Add any hidden fields from the form
+            # Add any other hidden fields from the form (if they exist)
             for hidden_input in soup.find_all('input', type='hidden'):
                 name = hidden_input.get('name')
                 value = hidden_input.get('value', '')
-                if name:
+                if name and name not in login_data:
                     login_data[name] = value
 
             # Submit login form
@@ -221,6 +223,7 @@ class WAZNieplitzClient:
             if not action.startswith('http'):
                 action = BASE_URL + action
 
+            logger.debug(f"Posting login to: {action}")
             response = self.session.post(action, data=login_data, timeout=30)
             response.raise_for_status()
 
@@ -231,6 +234,8 @@ class WAZNieplitzClient:
                 return True
             else:
                 logger.error("Login failed - could not access readings page")
+                logger.debug(f"Response status: {test_response.status_code}")
+                logger.debug(f"Response contains 'Ablesungen': {'Ablesungen' in test_response.text}")
                 return False
 
         except Exception as e:

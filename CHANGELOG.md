@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.2.5] - 2025-12-18
+
+### Fixed
+- **Critical:** Corrected login form field names
+  - Changed from generic `username`/`password` fields to actual portal field names
+  - Now using: `fieldLoginBenutzername`, `fieldLoginPasswort`, `fieldFormSent`, `fieldSFileReferer`
+  - Previous generic field names were causing login to fail silently
+  - This fixes the "can't find readings" error by enabling successful authentication
+
 ## [1.2.4] - 2025-12-17
 
 ### Fixed
