@@ -20,7 +20,7 @@
         }
 
         .container {
-            max-width: 800px;
+            max-width: 900px;
             margin: 0 auto;
         }
 
@@ -58,8 +58,11 @@
             font-size: 16px;
             cursor: pointer;
             transition: background 0.3s;
-            width: 100%;
             font-weight: 500;
+        }
+
+        .button.full-width {
+            width: 100%;
         }
 
         .button:hover {
@@ -73,6 +76,19 @@
         .button:disabled {
             background: #555;
             cursor: not-allowed;
+        }
+
+        .button.danger {
+            background: #d32f2f;
+        }
+
+        .button.danger:hover {
+            background: #c62828;
+        }
+
+        .button.small {
+            padding: 6px 12px;
+            font-size: 14px;
         }
 
         .info {
@@ -122,6 +138,85 @@
             font-size: 0.9em;
             color: #999;
         }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            color: #ccc;
+            font-size: 0.9em;
+        }
+
+        .form-group input,
+        .form-group select {
+            width: 100%;
+            padding: 10px;
+            background: #2a2a2a;
+            border: 1px solid #444;
+            border-radius: 4px;
+            color: #fff;
+            font-size: 16px;
+        }
+
+        .form-group input:focus,
+        .form-group select:focus {
+            outline: none;
+            border-color: #03a9f4;
+        }
+
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 15px;
+        }
+
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #333;
+        }
+
+        th {
+            background: #2a2a2a;
+            color: #03a9f4;
+            font-weight: 600;
+        }
+
+        tr:hover {
+            background: #252525;
+        }
+
+        .no-data {
+            text-align: center;
+            padding: 30px;
+            color: #666;
+            font-style: italic;
+        }
+
+        .meter-section {
+            margin-bottom: 20px;
+        }
+
+        .meter-section h3 {
+            color: #03a9f4;
+            margin-bottom: 10px;
+            font-size: 1.1em;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: #999;
+        }
     </style>
 </head>
 <body>
@@ -134,11 +229,44 @@
             <p style="margin-bottom: 15px; color: #ccc;">
                 Trigger an immediate fetch of water meter readings from the portal.
             </p>
-            <button id="fetchBtn" class="button" onclick="triggerFetch()">
+            <button id="fetchBtn" class="button full-width" onclick="triggerFetch()">
                 Fetch Readings Now
             </button>
-            <div id="message" class="message"></div>
-            <div class="status" id="status"></div>
+            <div id="fetchMessage" class="message"></div>
+            <div class="status" id="fetchStatus"></div>
+        </div>
+
+        <div class="card">
+            <h2>Historical Readings</h2>
+            <p style="margin-bottom: 15px; color: #ccc;">
+                Add readings from years beyond the 2-year portal window. Consumption is calculated automatically based on previous readings.
+            </p>
+
+            <form id="historicalForm" onsubmit="addHistoricalReading(event)">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="meter">Meter</label>
+                        <select id="meter" required>
+                            <option value="">Select meter...</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="date">Date</label>
+                        <input type="date" id="date" required>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="reading">Reading (m³)</label>
+                    <input type="number" id="reading" step="1" min="0" required>
+                </div>
+                <button type="submit" class="button full-width">Add Historical Reading</button>
+            </form>
+
+            <div id="historicalMessage" class="message"></div>
+
+            <div id="historicalReadings">
+                <div class="loading">Loading historical readings...</div>
+            </div>
         </div>
 
         <div class="card">
@@ -146,7 +274,7 @@
             <div class="info">
                 <p><strong>Update Interval:</strong> Configured in add-on settings (default: 30 days)</p>
                 <p><strong>Manual Fetch:</strong> Click the button above to fetch readings immediately</p>
-                <p><strong>Historical Readings:</strong> Use the file-based interface in /data/historical_command.json</p>
+                <p><strong>Historical Readings:</strong> Add readings older than the portal's 2-year window</p>
                 <p><strong>Configuration:</strong> Configure meter numbers in the add-on configuration page</p>
             </div>
         </div>
@@ -154,7 +282,9 @@
 
     <script>
         let fetchInProgress = false;
+        let config = {};
 
+        // Trigger manual fetch
         async function triggerFetch() {
             if (fetchInProgress) {
                 return;
@@ -162,8 +292,8 @@
 
             fetchInProgress = true;
             const btn = document.getElementById('fetchBtn');
-            const message = document.getElementById('message');
-            const status = document.getElementById('status');
+            const message = document.getElementById('fetchMessage');
+            const status = document.getElementById('fetchStatus');
 
             btn.disabled = true;
             btn.textContent = 'Fetching...';
@@ -185,6 +315,8 @@
                     message.className = 'message success';
                     message.textContent = '✓ ' + data.message;
                     status.textContent = 'Last fetch: ' + new Date().toLocaleString();
+                    // Reload historical readings to update tables
+                    loadHistoricalReadings();
                 } else {
                     message.className = 'message error';
                     message.textContent = '✗ Error: ' + data.message;
@@ -199,9 +331,199 @@
             }
         }
 
+        // Add historical reading
+        async function addHistoricalReading(event) {
+            event.preventDefault();
+
+            const message = document.getElementById('historicalMessage');
+            const meterNumber = document.getElementById('meter').value;
+            const date = document.getElementById('date').value;
+            const reading = parseInt(document.getElementById('reading').value);
+
+            message.className = 'message';
+            message.style.display = 'none';
+
+            try {
+                const response = await fetch('/historical/add', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        meter_number: meterNumber,
+                        date: date,
+                        reading: reading
+                    })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    message.className = 'message success';
+                    message.textContent = '✓ ' + data.message;
+                    document.getElementById('historicalForm').reset();
+                    loadHistoricalReadings();
+                } else {
+                    message.className = 'message error';
+                    message.textContent = '✗ Error: ' + data.message;
+                }
+            } catch (error) {
+                message.className = 'message error';
+                message.textContent = '✗ Error: ' + error.message;
+            }
+        }
+
+        // Delete historical reading
+        async function deleteHistoricalReading(meterNumber, date) {
+            if (!confirm(`Delete reading for ${meterNumber} on ${date}?`)) {
+                return;
+            }
+
+            const message = document.getElementById('historicalMessage');
+            message.className = 'message';
+            message.style.display = 'none';
+
+            try {
+                const response = await fetch('/historical/delete', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        meter_number: meterNumber,
+                        date: date
+                    })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    message.className = 'message success';
+                    message.textContent = '✓ Reading deleted';
+                    loadHistoricalReadings();
+                } else {
+                    message.className = 'message error';
+                    message.textContent = '✗ Error: ' + data.message;
+                }
+            } catch (error) {
+                message.className = 'message error';
+                message.textContent = '✗ Error: ' + error.message;
+            }
+        }
+
+        // Load configuration and historical readings
+        async function loadConfig() {
+            try {
+                const response = await fetch('/config');
+                const data = await response.json();
+                config = data;
+
+                // Populate meter dropdown
+                const meterSelect = document.getElementById('meter');
+                meterSelect.innerHTML = '<option value="">Select meter...</option>';
+
+                if (data.main_meter_number) {
+                    const option = document.createElement('option');
+                    option.value = data.main_meter_number;
+                    option.textContent = `${data.main_meter_name || 'Main'} (${data.main_meter_number})`;
+                    meterSelect.appendChild(option);
+                }
+
+                if (data.garden_meter_number) {
+                    const option = document.createElement('option');
+                    option.value = data.garden_meter_number;
+                    option.textContent = `${data.garden_meter_name || 'Garden'} (${data.garden_meter_number})`;
+                    meterSelect.appendChild(option);
+                }
+            } catch (error) {
+                console.error('Error loading config:', error);
+            }
+        }
+
+        // Load historical readings
+        async function loadHistoricalReadings() {
+            const container = document.getElementById('historicalReadings');
+
+            try {
+                const response = await fetch('/historical/list');
+                const data = await response.json();
+
+                if (!data.readings || Object.keys(data.readings).length === 0) {
+                    container.innerHTML = '<div class="no-data">No historical readings yet</div>';
+                    return;
+                }
+
+                let html = '';
+
+                for (const [meterNumber, readings] of Object.entries(data.readings)) {
+                    const meterName = getMeterName(meterNumber);
+
+                    html += `
+                        <div class="meter-section">
+                            <h3>${meterName} (${meterNumber})</h3>
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Date</th>
+                                        <th>Reading (m³)</th>
+                                        <th>Consumption (m³)</th>
+                                        <th>Type</th>
+                                        <th>Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                    `;
+
+                    readings.forEach(reading => {
+                        const date = new Date(reading.date).toLocaleDateString();
+                        html += `
+                            <tr>
+                                <td>${date}</td>
+                                <td>${reading.reading}</td>
+                                <td>${reading.consumption || '-'}</td>
+                                <td>${reading.reading_type || 'Manual Entry'}</td>
+                                <td>
+                                    <button class="button small danger"
+                                            onclick="deleteHistoricalReading('${meterNumber}', '${reading.date}')">
+                                        Delete
+                                    </button>
+                                </td>
+                            </tr>
+                        `;
+                    });
+
+                    html += `
+                                </tbody>
+                            </table>
+                        </div>
+                    `;
+                }
+
+                container.innerHTML = html;
+            } catch (error) {
+                container.innerHTML = '<div class="no-data">Error loading historical readings</div>';
+                console.error('Error loading historical readings:', error);
+            }
+        }
+
+        // Helper to get meter name from config
+        function getMeterName(meterNumber) {
+            if (config.main_meter_number === meterNumber) {
+                return config.main_meter_name || 'Main';
+            } else if (config.garden_meter_number === meterNumber) {
+                return config.garden_meter_name || 'Garden';
+            }
+            return 'Unknown';
+        }
+
         // Update status on load
-        window.addEventListener('load', function() {
-            const status = document.getElementById('status');
+        window.addEventListener('load', async function() {
+            const status = document.getElementById('fetchStatus');
+
+            // Load config
+            await loadConfig();
+
+            // Load status
             fetch('/status')
                 .then(response => response.json())
                 .then(data => {
@@ -210,6 +532,9 @@
                     }
                 })
                 .catch(err => console.error('Error fetching status:', err));
+
+            // Load historical readings
+            loadHistoricalReadings();
         });
     </script>
 </body>

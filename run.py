@@ -16,7 +16,7 @@ from typing import Dict, List, Optional
 import requests
 from bs4 import BeautifulSoup
 from dateutil import parser as date_parser
-from flask import Flask, jsonify, send_file
+from flask import Flask, jsonify, send_file, request
 
 # Configure logging
 logging.basicConfig(
@@ -43,7 +43,9 @@ app.logger.setLevel(logging.ERROR)  # Suppress Flask logging
 # Global state for web interface
 app_state = {
     'last_fetch': None,
-    'fetch_callback': None  # Will be set to trigger manual fetch
+    'fetch_callback': None,  # Will be set to trigger manual fetch
+    'historical_manager': None,  # Will be set to historical readings manager
+    'config': None  # Will be set to configuration
 }
 
 
@@ -707,6 +709,136 @@ def status():
     })
 
 
+@app.route('/config')
+def get_config():
+    """Get configuration for meter numbers and names."""
+    try:
+        config = app_state.get('config', {})
+        return jsonify({
+            'main_meter_number': config.get('main_meter_number', ''),
+            'main_meter_name': config.get('main_meter_name', 'Main'),
+            'garden_meter_number': config.get('garden_meter_number', ''),
+            'garden_meter_name': config.get('garden_meter_name', 'Garden')
+        })
+    except Exception as e:
+        logger.error(f"Error in config route: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/historical/add', methods=['POST'])
+def add_historical():
+    """Add a historical reading."""
+    try:
+        data = request.get_json()
+        meter_number = data.get('meter_number')
+        date = data.get('date')
+        reading = data.get('reading')
+
+        if not meter_number or not date or reading is None:
+            return jsonify({
+                'success': False,
+                'message': 'Missing required fields'
+            }), 400
+
+        historical_manager = app_state.get('historical_manager')
+        if not historical_manager:
+            return jsonify({
+                'success': False,
+                'message': 'Historical manager not initialized'
+            }), 500
+
+        # Add the reading (consumption will be calculated automatically)
+        success = historical_manager.add_reading(
+            meter_number=meter_number,
+            date=date,
+            reading=float(reading),
+            consumption=None,  # Let it calculate automatically
+            reading_type='Manual Entry'
+        )
+
+        if success:
+            return jsonify({
+                'success': True,
+                'message': 'Historical reading added successfully'
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'message': 'Failed to add reading'
+            }), 500
+
+    except Exception as e:
+        logger.error(f"Error adding historical reading: {e}")
+        return jsonify({
+            'success': False,
+            'message': str(e)
+        }), 500
+
+
+@app.route('/historical/delete', methods=['POST'])
+def delete_historical():
+    """Delete a historical reading."""
+    try:
+        data = request.get_json()
+        meter_number = data.get('meter_number')
+        date = data.get('date')
+
+        if not meter_number or not date:
+            return jsonify({
+                'success': False,
+                'message': 'Missing required fields'
+            }), 400
+
+        historical_manager = app_state.get('historical_manager')
+        if not historical_manager:
+            return jsonify({
+                'success': False,
+                'message': 'Historical manager not initialized'
+            }), 500
+
+        success = historical_manager.delete_reading(meter_number, date)
+
+        if success:
+            return jsonify({
+                'success': True,
+                'message': 'Historical reading deleted successfully'
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'message': 'Failed to delete reading'
+            }), 500
+
+    except Exception as e:
+        logger.error(f"Error deleting historical reading: {e}")
+        return jsonify({
+            'success': False,
+            'message': str(e)
+        }), 500
+
+
+@app.route('/historical/list')
+def list_historical():
+    """List all historical readings."""
+    try:
+        historical_manager = app_state.get('historical_manager')
+        if not historical_manager:
+            return jsonify({
+                'readings': {}
+            })
+
+        return jsonify({
+            'readings': historical_manager.readings
+        })
+
+    except Exception as e:
+        logger.error(f"Error listing historical readings: {e}")
+        return jsonify({
+            'readings': {},
+            'error': str(e)
+        }), 500
+
+
 def run_web_server():
     """Run the Flask web server."""
     try:
@@ -751,6 +883,8 @@ def main():
         return fetch_and_update_meters(client, ha_api, config, historical_manager)
 
     app_state['fetch_callback'] = fetch_callback
+    app_state['historical_manager'] = historical_manager
+    app_state['config'] = config
 
     # Start web server in background thread
     web_thread = threading.Thread(target=run_web_server, daemon=True)

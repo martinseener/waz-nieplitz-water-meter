@@ -2,6 +2,36 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.3.1] - 2025-12-18
+
+### Added
+- **Historical Readings Web Interface**
+  - Added form to add historical readings directly from web interface
+  - Table view showing all historical readings per configured meter
+  - Delete button for each historical reading
+  - Meter dropdown automatically populated from configuration
+  - Date picker for easy date selection
+  - Real-time updates after adding/deleting readings
+
+### Changed
+- **Consumption is now optional and auto-calculated**
+  - No need to manually enter consumption values
+  - System calculates consumption based on previous readings
+  - Simplified historical readings form (removed consumption field)
+
+### Improved
+- More user-friendly historical readings management
+- No more manual JSON file editing required
+- Better visual presentation of historical data
+- Separate tables for each configured meter
+- Confirmation dialog before deleting readings
+
+### Technical
+- Added Flask routes: /config, /historical/add, /historical/delete, /historical/list
+- Web interface now fetches configuration dynamically
+- Historical manager integrated with web interface
+- Enhanced error handling and user feedback
+
 ## [1.3.0] - 2025-12-18
 
 ### Added
