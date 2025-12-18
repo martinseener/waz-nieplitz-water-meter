@@ -2,6 +2,38 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.3.2] - 2025-12-18
+
+### Fixed
+- **Empty meter dropdown in web interface**
+  - Added fallback to load config directly if not in app_state
+  - Improved error handling in /config route
+  - Config now strips whitespace from meter numbers
+  - Better logging to debug configuration issues
+
+### Improved
+- **Enhanced logging for debugging**
+  - Added detailed logging of portal table scraping
+  - Shows number of rows found in readings table
+  - Logs each reading being processed with date, value, consumption
+  - Logs when readings are added to existing meters
+  - Better visibility into what data is being captured
+- Better error messages in web interface config route
+
+### Technical
+- Improved /config endpoint with fallback loading
+- Added INFO-level logging for portal scraping process
+- Helps diagnose issues with missing readings or incorrect meter data
+
+### Known Limitations
+- **Sensor timestamps**: Home Assistant's State API doesn't support backdating states
+  - Sensor state timestamp is always "now" when updated via API
+  - All readings (portal and historical) are stored in sensor **attributes**:
+    - `portal_readings` - All readings from the 2-year portal window
+    - `historical_readings` - Manually added readings beyond 2-year window
+  - Current sensor state shows the most recent reading value
+  - For historical graphs, you would need to use HA's Recorder API (more complex)
+
 ## [1.3.1] - 2025-12-18
 
 ### Added

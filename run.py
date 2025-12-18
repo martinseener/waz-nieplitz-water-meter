@@ -277,11 +277,14 @@ class WAZNieplitzClient:
 
             # Parse table rows - collect ALL readings per meter
             rows = table.find_all('tr', class_='item')
-            for row in rows:
+            logger.info(f"Found {len(rows)} row(s) in readings table")
+
+            for idx, row in enumerate(rows):
                 # Extract meter number
                 meter_cell = row.find('td', class_='zaehler')
                 if meter_cell:
                     meter_number = meter_cell.get_text(strip=True).replace('Zähler', '').strip()
+                    logger.info(f"Row {idx+1}: Processing meter {meter_number}")
 
                     # Extract reading date (Ablesetag)
                     ablesetag_cell = row.find('td', class_='ablesetag')
@@ -349,6 +352,8 @@ class WAZNieplitzClient:
                         'reference_date': reference_date.isoformat() if reference_date else None
                     }
 
+                    logger.info(f"  → Date={primary_date}, Reading={reading_value} m³, Consumption={consumption_value} m³, Type={ablesart}")
+
                     # Initialize meter if not exists
                     if meter_number not in meters:
                         meters[meter_number] = {
@@ -364,11 +369,13 @@ class WAZNieplitzClient:
                     else:
                         # Add this reading to the portal readings list
                         meters[meter_number]['portal_readings'].append(reading_entry)
+                        logger.debug(f"  Added to existing meter {meter_number} (now {len(meters[meter_number]['portal_readings'])} reading(s))")
 
                         # Update current reading if this one is more recent
                         existing = meters[meter_number]
                         if primary_date and existing.get('primary_date'):
                             if primary_date > existing['primary_date']:
+                                logger.debug(f"  Updating current reading for {meter_number} (newer date)")
                                 meters[meter_number].update({
                                     'reading_date': reading_date,
                                     'reference_date': reference_date,
@@ -713,16 +720,31 @@ def status():
 def get_config():
     """Get configuration for meter numbers and names."""
     try:
-        config = app_state.get('config', {})
-        return jsonify({
-            'main_meter_number': config.get('main_meter_number', ''),
+        config = app_state.get('config')
+
+        if config is None:
+            # Config not loaded yet, try loading directly
+            logger.warning("Config not in app_state, loading directly")
+            config = load_config()
+
+        result = {
+            'main_meter_number': config.get('main_meter_number', '').strip(),
             'main_meter_name': config.get('main_meter_name', 'Main'),
-            'garden_meter_number': config.get('garden_meter_number', ''),
+            'garden_meter_number': config.get('garden_meter_number', '').strip(),
             'garden_meter_name': config.get('garden_meter_name', 'Garden')
-        })
+        }
+
+        logger.info(f"Config route returning: main={result['main_meter_number']}, garden={result['garden_meter_number']}")
+        return jsonify(result)
     except Exception as e:
         logger.error(f"Error in config route: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({
+            'error': str(e),
+            'main_meter_number': '',
+            'main_meter_name': 'Main',
+            'garden_meter_number': '',
+            'garden_meter_name': 'Garden'
+        }), 500
 
 
 @app.route('/historical/add', methods=['POST'])
