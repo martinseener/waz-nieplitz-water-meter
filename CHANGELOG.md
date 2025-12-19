@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.5.3] - 2025-12-19
+
+### Fixed
+- **Sensor state now uses most recent reading from ALL sources**
+  - Combines portal readings AND historical readings
+  - Sorts by date and uses the newest reading as sensor state
+  - Historical readings added via web interface now update the sensor
+  - Example: Manual reading for today (485) will now show instead of portal reading (484)
+
+### Changed
+- Sensor state determination logic improved
+- Now checks all available readings (portal + historical) to find most recent
+- Logs which reading type and date is being used for sensor state
+
+### Technical
+- Added logic to merge and sort all readings by date
+- Uses most recent reading regardless of source (portal vs manual)
+- Maintains backwards compatibility with portal-only operation
+
 ## [1.5.2] - 2025-12-18
 
 ### Fixed

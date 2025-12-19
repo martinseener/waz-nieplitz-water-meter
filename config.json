@@ -1,6 +1,6 @@
 {
   "name": "WAZ Nieplitz Water Meter",
-  "version": "1.5.2",
+  "version": "1.5.3",
   "slug": "waz-nieplitz-water-meter",
   "description": "Fetch water meter readings from WAZ Nieplitz customer portal. Default: monthly updates (readings are typically annual). Supports manual fetch and historical readings beyond the 2-year portal window.",
   "arch": ["armhf", "armv7", "aarch64", "amd64", "i386"],

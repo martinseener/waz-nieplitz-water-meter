@@ -723,9 +723,37 @@ def fetch_and_update_meters(client: WAZNieplitzClient, ha_api: HomeAssistantAPI,
                     attributes['historical_count'] = len(historical_readings)
                     logger.info(f"Meter {meter['meter_number']}: {len(historical_readings)} historical reading(s)")
 
+            # Determine the most recent reading from ALL sources (portal + historical)
+            # This ensures manual/historical readings can update the current sensor state
+            current_reading = meter['reading']  # Start with portal reading
+
+            # Collect all readings with dates
+            all_readings_with_dates = []
+
+            # Add portal readings
+            if 'portal_readings' in meter and meter['portal_readings']:
+                all_readings_with_dates.extend(meter['portal_readings'])
+
+            # Add historical readings
+            if historical_manager:
+                historical_readings = historical_manager.get_readings(meter['meter_number'])
+                if historical_readings:
+                    all_readings_with_dates.extend(historical_readings)
+
+            # Find most recent reading
+            if all_readings_with_dates:
+                sorted_all = sorted(
+                    all_readings_with_dates,
+                    key=lambda x: x.get('date', ''),
+                    reverse=True
+                )
+                if sorted_all and sorted_all[0].get('reading') is not None:
+                    current_reading = sorted_all[0]['reading']
+                    logger.info(f"Using most recent reading from {sorted_all[0].get('reading_type', 'unknown')}: {current_reading} (date: {sorted_all[0].get('date')})")
+
             # Update sensor
-            logger.info(f"Updating {entity_id} with state={meter['reading']} (type: {type(meter['reading']).__name__})")
-            ha_api.update_sensor(entity_id, meter['reading'], attributes)
+            logger.info(f"Updating {entity_id} with state={current_reading} (type: {type(current_reading).__name__})")
+            ha_api.update_sensor(entity_id, current_reading, attributes)
 
             # Import statistics for Energy Dashboard historical graphs
             all_readings = []
