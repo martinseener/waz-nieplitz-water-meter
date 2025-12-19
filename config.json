@@ -31,6 +31,6 @@
   "auth_api": false,
   "ingress": true,
   "ingress_port": 8099,
-  "panel_icon": "mdi:water-pump",
+  "panel_icon": "mdi:water",
   "panel_title": "WAZ Nieplitz Water"
 }
